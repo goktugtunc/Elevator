@@ -12,6 +12,8 @@
  *
  * Metro web hedefinde bu dosya yerine ./wallet.web.ts kullanılır.
  */
+import * as Linking from 'expo-linking';
+
 import { UniversalProvider } from '@walletconnect/universal-provider';
 
 import { WalletError, type ConnectOptions, type WalletAdapter } from './types';
@@ -27,12 +29,19 @@ const CHAIN = `stellar:${stellarConfig.network === 'mainnet' ? 'pubnet' : 'testn
 /** WalletConnect Stellar yöntemleri (SEP tarafı değil, cüzdan RPC'si). */
 const METHODS = ['stellar_signXDR', 'stellar_signAndSubmitXDR'];
 
+/**
+ * Cüzdan imzadan sonra buraya geri döner. Expo Go'da uygulamanın kendi scheme'i
+ * (traderkirala://) kayıtlı DEĞİLDİR; `Linking.createURL` Expo Go'da
+ * `exp://<host>/--/` üretir, derlenmiş uygulamada `traderkirala://`.
+ */
+const RETURN_URL = Linking.createURL('/');
+
 const APP_METADATA = {
   name: 'TraderKirala',
   description: 'Rent a trader, keep your capital on Stellar.',
   url: 'https://traderkirala.app',
   icons: ['https://traderkirala.app/icon.png'],
-  redirect: { native: 'traderkirala://', universal: '' },
+  redirect: { native: RETURN_URL, universal: '' },
 };
 
 let providerPromise: Promise<Provider> | null = null;

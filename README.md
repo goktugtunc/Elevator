@@ -15,36 +15,18 @@ traderkirala/
 └── SPRINT-1.md   Sprint planı ve görev listesi
 ```
 
-## Servisler
-
-| Ne | Nerede |
-|---|---|
-| Backend API | <https://mobilback.yolalapp.com> · uçlar `/api/v1` önekiyle · şema: `/docs`, `/openapi.json` |
-| Ağ | Stellar **Testnet** (`Test SDF Network ; September 2015`) |
-| Frontend | Yerel: `http://localhost:8081` · herkese açık URL: FE-21 ile eklenecek |
-
 ## Hızlı başlangıç (frontend)
 
 ```bash
 cd app
-cp .env.example .env      # backend URL'si hazır; kontrat ID'leri deploy sonrası
+cp .env.example .env      # değerleri doldur (backend/kontrat ID'leri gelince)
 npm install
-npm run web               # tarayıcı  → http://localhost:8081
-npm start                 # mobil     → QR'ı Expo Go ile okut
+npm run web               # http://localhost:8081
 ```
 
 Diğer komutlar: `npm run typecheck`, `npm run lint`, `npm run export:web` (statik build → `app/dist`).
 
-**Arayüz dili İngilizce**, belgeler ve kod yorumları Türkçe.
-
-### Cüzdan
-
-| Platform | Nasıl |
-|---|---|
-| Web | Stellar Wallets Kit — Freighter, xBull, Albedo, Lobstr… Cüzdanı **Testnet**'e alın. |
-| iOS / Android (Expo Go) | WalletConnect v2 — QR ya da Lobstr / xBull deep link'i. `EXPO_PUBLIC_WALLETCONNECT_PROJECT_ID` doldurulmalı (ücretsiz: [cloud.reown.com](https://cloud.reown.com)). |
-
-Uygulama Expo Go ile çalışır: özel native modül kullanılmaz (rastgelelik `expo-crypto`, pano `expo-clipboard`, QR `react-native-qrcode-svg`).
+Cüzdan: web'de Stellar Wallets Kit (Freighter, xBull, Albedo, Lobstr…). Freighter'ı **Testnet**'e alın. Mobil cüzdan (WalletConnect) sprint kapsamında prototiplenecek.
 
 ## Mimari
 
@@ -109,9 +91,23 @@ flowchart LR
 
 - [SPRINT-1.md](SPRINT-1.md) — sprint planı ve görev listesi
 - [docs/design-system.md](docs/design-system.md) — Figma tasarım sistemi ↔ kod eşlemesi
-- [docs/mobil-test.md](docs/mobil-test.md) — Expo Go + iOS simülatörü ile cüzdan testi
 - [docs/gelistirme-notlari.md](docs/gelistirme-notlari.md) — teknik kararlar, birleşme noktaları, açık konular
 - Figma: `6ZxzvsYKarDglg0PGYRIgP` — TraderKirala Mobil Tasarım Sistemi
+
+## Kullanılan Stellar Skills
+
+Handbook teslim şartı: kullanılan skill dosyaları yol olarak belirtilir (kaynak: [skills.stellar.org](https://skills.stellar.org/)).
+
+| Skill dosyası | Nerede kullanıldı |
+|---|---|
+| `skills/dapp/SKILL.md` | Cüzdan adaptörü (Stellar Wallets Kit v2), `@stellar/stellar-sdk` istemcileri, işlem imzalama/gönderme akışı (`app/src/lib/wallet`, `app/src/lib/stellar`) |
+| `skills/standards/SKILL.md` | SEP-10 giriş, SEP-24 anchor akışı seçimi (`app/src/lib/auth/sep10.ts`, `anchorApi`) |
+| `skills/anchors/SKILL.md` | _backend anchor entegrasyonu — eklenecek_ |
+| `skills/smart-contracts/SKILL.md` | _escrow / listing kontratları — eklenecek_ |
+
+## Yol haritası ve sonraki adım
+
+_Teslim öncesi doldurulacak: hackathon sonrası 3 adım + hedef (SCF / InstaAward başvurusu)._
 
 ## Kontrat ID'leri ve deploy çıktıları
 
