@@ -92,6 +92,30 @@ tercihimiz değil, Freighter'ın entegrasyon yolu böyle. Kimlik girilince cüzd
 seçim ekranında "WalletConnect" seçeneği belirir; QR ya da "Open installed wallet"
 ile Freighter mobile açılır.
 
+### WalletConnect proje kimliği nasıl alınır
+
+1. <https://dashboard.reown.com> (eski adıyla cloud.walletconnect.com) → **Sign up**
+   (GitHub / Google / e-posta). Ücretsiz, kart istemez.
+2. **Create project** → ad: `TraderKirala`.
+3. Ürün sorulursa **AppKit** (dApp tarafı; cüzdan yapmıyoruz), platform **React Native**.
+4. Proje açılınca **Project ID** panoda görünür — 32 karakterlik hex. Kopyala.
+5. `app/.env` dosyasına yaz ve Metro'yu temiz başlat:
+   ```bash
+   EXPO_PUBLIC_WALLETCONNECT_PROJECT_ID=<kopyaladığın-id>
+   ```
+   ```bash
+   cd app && npx expo start --clear
+   ```
+
+**Allowlist tuzağı:** panodaki *Allowlist* alanına bundle id girerseniz Expo Go'da
+bağlantı reddedilir; çünkü Expo Go'nun kendi kimliği çalışır (`host.exp.Exponent` /
+`host.exp.exponent`), bizim `com.traderkirala.app` değil. Test aşamasında allowlist'i
+**boş bırakın**; derlenmiş uygulamaya geçince `com.traderkirala.app` ekleyin
+(değişiklikler ~15 dakikada etkinleşir).
+
+Project ID istemci tarafında görünür bir değerdir (gizli anahtar değildir), ancak
+`.env` git'e girmez — `.env.example` yalnızca boş şablonu taşır.
+
 Uzantıyı ve mobil uygulamayı **Testnet**'e almayı unutmayın (Freighter → Settings → Network).
 
 ## 6. Bilinen sınırlar
