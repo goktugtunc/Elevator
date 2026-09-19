@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { Screen, TopBar } from '@/components/layout';
-import { Button, Card, Chip, Field, Pill, Text } from '@/components/ui';
+import { Button, Card, Chip, Field, Pill, Progress, Text } from '@/components/ui';
 import { type RegisterPayload } from '@/lib/api';
 import { userMessage } from '@/lib/errors';
 import { parseTRNumber } from '@/lib/format';
@@ -120,14 +120,10 @@ export default function RegisterDetails() {
     <Screen padded={false}>
       <TopBar title="Kayıt Ol" />
       <View style={styles.body}>
-        <View style={styles.progress}>
-          <Text variant="caption" color="text2">
-            Adım 2/2 · {isTrader ? 'Trader Bilgileri' : 'Müşteri Bilgileri'}
-          </Text>
-          <View style={styles.track}>
-            <View style={styles.fill} />
-          </View>
-        </View>
+        <Progress
+          value={1}
+          label={`Adım 2/2 · ${isTrader ? 'Trader Bilgileri' : 'Müşteri Bilgileri'}`}
+        />
 
         <View style={{ gap: spacing.xs }}>
           <Text variant="h1">Seni tanıyalım</Text>
@@ -304,9 +300,6 @@ function ChipGroup({
 
 const styles = StyleSheet.create({
   body: { paddingHorizontal: spacing.lg, paddingBottom: spacing['2xl'], gap: spacing.lg },
-  progress: { gap: spacing.sm },
-  track: { height: 4, borderRadius: 2, backgroundColor: colors.surfaceSunken, overflow: 'hidden' },
-  fill: { height: 4, width: '100%', backgroundColor: colors.navy900 },
   walletCard: {
     flexDirection: 'row',
     alignItems: 'center',

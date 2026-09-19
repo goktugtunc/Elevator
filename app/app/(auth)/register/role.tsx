@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { Screen, TopBar } from '@/components/layout';
-import { Button, Text } from '@/components/ui';
+import { Button, Progress, Text } from '@/components/ui';
 import { colors, radius, spacing } from '@/theme';
 import type { Role } from '@/types';
 
@@ -48,14 +48,7 @@ export default function RegisterRole() {
     <Screen padded={false}>
       <TopBar title="Kayıt Ol" />
       <View style={styles.body}>
-        <View style={styles.progress}>
-          <Text variant="caption" color="text2">
-            Adım 1/2 · Rol Seçimi
-          </Text>
-          <View style={styles.track}>
-            <View style={[styles.fill, { width: '50%' }]} />
-          </View>
-        </View>
+        <Progress value={0.5} label="Adım 1/2 · Rol Seçimi" />
 
         <Text variant="h1">Hesabını nasıl kullanacaksın?</Text>
         <Text variant="body" color="text2">
@@ -112,9 +105,6 @@ export default function RegisterRole() {
 
 const styles = StyleSheet.create({
   body: { paddingHorizontal: spacing.lg, paddingBottom: spacing['2xl'], gap: spacing.lg },
-  progress: { gap: spacing.sm },
-  track: { height: 4, borderRadius: 2, backgroundColor: colors.surfaceSunken, overflow: 'hidden' },
-  fill: { height: 4, backgroundColor: colors.navy900 },
   option: {
     backgroundColor: colors.surface,
     borderWidth: 1.5,

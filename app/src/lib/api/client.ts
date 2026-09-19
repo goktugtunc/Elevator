@@ -14,6 +14,8 @@ export class ApiError extends Error {
     public readonly status: number,
     message: string,
     public readonly body?: unknown,
+    /** Sunucunun makine okunur hata kodu (ör. "http_error", "validation_error"). */
+    public readonly code?: string,
   ) {
     super(message);
     this.name = 'ApiError';
@@ -49,7 +51,8 @@ interface RequestOptions {
 
 async function request<T>(method: Method, path: string, options: RequestOptions = {}): Promise<T> {
   const { body, auth = true, query, retried = false } = options;
-  const url = new URL(path, env.apiBaseUrl);
+  // Not: `new URL(path, base)` taban yolundaki öneki (/api/v1) yutar; elle birleştiriyoruz.
+  const url = new URL(`${env.apiBaseUrl.replace(/\/+$/, '')}${path}`);
   if (query) {
     for (const [k, v] of Object.entries(query)) {
       if (v !== undefined) url.searchParams.set(k, String(v));
@@ -84,12 +87,11 @@ async function request<T>(method: Method, path: string, options: RequestOptions 
   }
 
   if (!res.ok) {
-    const serverMessage =
-      data && typeof data === 'object' && 'message' in data
-        ? String((data as { message: unknown }).message)
-        : '';
+    const envelope = data && typeof data === 'object' ? (data as Record<string, unknown>) : null;
+    const serverMessage = envelope && 'message' in envelope ? String(envelope.message) : '';
+    const code = envelope && typeof envelope.code === 'string' ? envelope.code : undefined;
     const message = serverMessage || `${method} ${path} → ${res.status}`;
-    throw new ApiError(res.status, message, data);
+    throw new ApiError(res.status, message, data, code);
   }
   return data as T;
 }

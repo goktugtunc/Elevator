@@ -15,11 +15,19 @@ traderkirala/
 └── SPRINT-1.md   Sprint planı ve görev listesi
 ```
 
+## Servisler
+
+| Ne | Nerede |
+|---|---|
+| Backend API | <https://mobilback.yolalapp.com> · uçlar `/api/v1` önekiyle · şema: `/docs`, `/openapi.json` |
+| Ağ | Stellar **Testnet** (`Test SDF Network ; September 2015`) |
+| Frontend | Yerel: `http://localhost:8081` · herkese açık URL: FE-21 ile eklenecek |
+
 ## Hızlı başlangıç (frontend)
 
 ```bash
 cd app
-cp .env.example .env      # değerleri doldur (backend/kontrat ID'leri gelince)
+cp .env.example .env      # backend URL'si hazır; kontrat ID'leri deploy sonrası
 npm install
 npm run web               # http://localhost:8081
 ```
