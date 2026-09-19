@@ -32,9 +32,9 @@ export default function TraderTrades() {
   const [tradeOn, setTradeOn] = useState<AgreementOut | null>(null);
 
   const dash = useQuery({
-    queryKey: ['dashboard'],
+    queryKey: ['dashboard', 'trader'],
     queryFn: dashboardApi.get,
-    select: (d) => d as TraderDashboardOut,
+    select: (d): TraderDashboardOut | null => (d.role === 'trader' ? d : null),
   });
 
   const agreements = useQuery({

@@ -82,15 +82,14 @@ export default function CreateListing() {
       if (!riskProfile) next.riskProfile = 'Choose a risk profile.';
     }
     if (index === 2) {
-      const duration = parseNumberInput(durationDays);
-      if (duration === null || duration <= 0) next.durationDays = 'Enter a duration in days.';
-      const loss = parseNumberInput(maxLoss);
-      if (loss === null || loss <= 0 || loss >= 100) next.maxLoss = 'Enter a value between 0 and 100.';
+      // Sunucu alanları ilan türüne göre ayırıyor: süre/tutar/varlık/max kayıp
+      // yalnız sermaye ilanında, komisyon/min. sermaye/beklenen getiri yalnız
+      // hizmet ilanında kabul ediliyor (listings.py → CAPITAL_FIELDS/SERVICE_FIELDS).
       if (isTrader) {
         const pct = parseNumberInput(commission);
         if (pct === null || pct <= 0 || pct > 50) next.commission = 'Enter a rate between 0% and 50%.';
         const min = parseNumberInput(minCapital);
-        if (min === null || min <= 0) next.minCapital = 'Enter a valid amount.';
+        if (min !== null && min <= 0) next.minCapital = 'Enter a valid amount.';
         const lo = parseNumberInput(returnMin);
         const hi = parseNumberInput(returnMax);
         if (lo !== null && hi !== null && lo > hi)
@@ -98,23 +97,25 @@ export default function CreateListing() {
       } else {
         const value = parseNumberInput(amount);
         if (value === null || value <= 0) next.amount = 'Enter the capital you want to allocate.';
+        const duration = parseNumberInput(durationDays);
+        if (duration === null || duration <= 0) next.durationDays = 'Enter a duration in days.';
+        const loss = parseNumberInput(maxLoss);
+        if (loss !== null && (loss <= 0 || loss >= 100))
+          next.maxLoss = 'Enter a value between 0 and 100.';
       }
     }
     return next;
   };
 
   const payload = useMemo((): ListingCreateIn => {
-    const duration = parseNumberInput(durationDays);
-    const loss = parseNumberInput(maxLoss);
+    // Ortak alanlar; türe özgü olanlar aşağıda eklenir. Karşı türün alanı
+    // gönderilirse sunucu 422 `field_not_allowed_for_kind` döndürüyor.
     const base: ListingCreateIn = {
       kind: isTrader ? 'service' : 'capital',
       title: title.trim(),
       description: description.trim(),
       markets,
       risk_profile: riskProfile,
-      base_asset_id: baseAsset?.id ?? null,
-      duration_days: duration ?? null,
-      max_loss_bps: loss !== null ? Math.round(loss * 100) : null,
     };
     if (isTrader) {
       const pct = parseNumberInput(commission);
@@ -130,7 +131,15 @@ export default function CreateListing() {
       };
     }
     const value = parseNumberInput(amount);
-    return { ...base, amount: value !== null ? String(value) : null };
+    const duration = parseNumberInput(durationDays);
+    const loss = parseNumberInput(maxLoss);
+    return {
+      ...base,
+      amount: value !== null ? String(value) : null,
+      base_asset_id: baseAsset?.id ?? null,
+      duration_days: duration ?? null,
+      max_loss_bps: loss !== null ? Math.round(loss * 100) : null,
+    };
   }, [
     isTrader, title, description, markets, riskProfile, baseAsset, durationDays,
     maxLoss, commission, minCapital, returnMin, returnMax, amount,
@@ -221,26 +230,6 @@ export default function CreateListing() {
 
         {step === 2 ? (
           <>
-            <Field
-              label="Duration"
-              value={durationDays}
-              onChangeText={setDurationDays}
-              placeholder="90"
-              keyboardType="number-pad"
-              suffix="days"
-              error={errors.durationDays}
-              hint="How long the agreement runs before it settles."
-            />
-            <Field
-              label="Max loss"
-              value={maxLoss}
-              onChangeText={setMaxLoss}
-              placeholder="20"
-              keyboardType="decimal-pad"
-              suffix="%"
-              error={errors.maxLoss}
-              hint="The escrow rejects trades that would push the value below this."
-            />
             {isTrader ? (
               <>
                 <Field
@@ -295,16 +284,38 @@ export default function CreateListing() {
                 </Text>
               </>
             ) : (
-              <Field
-                label="Capital"
-                value={amount}
-                onChangeText={setAmount}
-                placeholder="1000"
-                keyboardType="decimal-pad"
-                suffix={assetCode}
-                error={errors.amount}
-                hint="Your capital stays in your wallet until you fund an agreement."
-              />
+              <>
+                <Field
+                  label="Capital"
+                  value={amount}
+                  onChangeText={setAmount}
+                  placeholder="1000"
+                  keyboardType="decimal-pad"
+                  suffix={assetCode}
+                  error={errors.amount}
+                  hint="Your capital stays in your wallet until you fund an agreement."
+                />
+                <Field
+                  label="Duration"
+                  value={durationDays}
+                  onChangeText={setDurationDays}
+                  placeholder="90"
+                  keyboardType="number-pad"
+                  suffix="days"
+                  error={errors.durationDays}
+                  hint="How long the agreement runs before it settles."
+                />
+                <Field
+                  label="Max loss"
+                  value={maxLoss}
+                  onChangeText={setMaxLoss}
+                  placeholder="20"
+                  keyboardType="decimal-pad"
+                  suffix="%"
+                  error={errors.maxLoss}
+                  hint="The escrow rejects trades that would push the value below this."
+                />
+              </>
             )}
           </>
         ) : null}
@@ -319,21 +330,27 @@ export default function CreateListing() {
               <ReviewItem label="Type" value={isTrader ? 'Service listing' : 'Capital listing'} />
               <ReviewItem label="Markets" value={markets.join(', ') || '—'} />
               <ReviewItem label="Risk" value={riskProfile ?? '—'} />
-              <ReviewItem label="Duration" value={`${durationDays} days`} />
-              <ReviewItem label="Max loss" value={`${maxLoss}%`} />
               {isTrader ? (
                 <>
                   <ReviewItem label="Commission" value={`${commission}%`} />
                   <ReviewItem
                     label="Min. capital"
-                    value={formatAmount(payload.min_capital as string, assetCode)}
+                    value={minCapital ? formatAmount(payload.min_capital as string, assetCode) : '—'}
+                  />
+                  <ReviewItem
+                    label="Expected return"
+                    value={returnMin && returnMax ? `${returnMin}% – ${returnMax}%` : '—'}
                   />
                 </>
               ) : (
-                <ReviewItem
-                  label="Capital"
-                  value={formatAmount(payload.amount as string, assetCode)}
-                />
+                <>
+                  <ReviewItem
+                    label="Capital"
+                    value={formatAmount(payload.amount as string, assetCode)}
+                  />
+                  <ReviewItem label="Duration" value={`${durationDays} days`} />
+                  <ReviewItem label="Max loss" value={maxLoss ? `${maxLoss}%` : '—'} />
+                </>
               )}
             </View>
             {create.isError ? (

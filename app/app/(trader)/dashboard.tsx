@@ -32,10 +32,12 @@ export default function TraderDashboard() {
   const router = useRouter();
   const qc = useQueryClient();
 
+  // `role` ayırt edici alan; kör `as` dönüşümü yanlış gövdeyi doğruymuş gibi
+  // gösterip role özgü alanlarda (profile_checklist) çökmeye yol açıyordu.
   const dash = useQuery({
-    queryKey: ['dashboard'],
+    queryKey: ['dashboard', 'trader'],
     queryFn: dashboardApi.get,
-    select: (d) => d as TraderDashboardOut,
+    select: (d): TraderDashboardOut | null => (d.role === 'trader' ? d : null),
   });
 
   const refresh = () => {
@@ -65,7 +67,12 @@ export default function TraderDashboard() {
       />
       <View style={styles.body}>
         <AsyncBoundary query={dash}>
-          {(d) => (
+          {(d) =>
+            !d ? (
+              <Text variant="caption" color="text2">
+                Loading your trader profile…
+              </Text>
+            ) : (
             <>
               <View style={styles.kpis}>
                 <KpiBox
@@ -160,21 +167,23 @@ export default function TraderDashboard() {
 
               <Section title="Listing interactions">
                 <Card style={styles.interactions}>
-                  <Metric label="Listings" value={d.listing_interactions.listings ?? 0} />
-                  <Metric label="Views" value={d.listing_interactions.views ?? 0} />
-                  <Metric label="Likes" value={d.listing_interactions.likes ?? 0} />
-                  <Metric label="Offers" value={d.listing_interactions.offers ?? 0} />
+                  <Metric label="Listings" value={d.listing_interactions?.listings ?? 0} />
+                  <Metric label="Views" value={d.listing_interactions?.views ?? 0} />
+                  <Metric label="Likes" value={d.listing_interactions?.likes ?? 0} />
+                  <Metric label="Offers" value={d.listing_interactions?.offers ?? 0} />
                 </Card>
               </Section>
             </>
-          )}
+            )
+          }
         </AsyncBoundary>
       </View>
     </Screen>
   );
 }
 
-function ProfileChecklist({ checklist }: { checklist: ProfileChecklistOut }) {
+function ProfileChecklist({ checklist }: { checklist: ProfileChecklistOut | undefined }) {
+  if (!checklist) return null;
   const items: { key: keyof ProfileChecklistOut; label: string }[] = [
     { key: 'wallet_connected', label: 'Wallet connected' },
     { key: 'has_avatar', label: 'Profile photo' },

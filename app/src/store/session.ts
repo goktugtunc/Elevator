@@ -6,6 +6,7 @@ import type { MeOut, RegisterIn, RegisterOut, UserRole } from '@/lib/api/types';
 import { isExpired, loginWithSep10 } from '@/lib/auth';
 import { userMessage } from '@/lib/errors';
 import { debugError, debugLog } from '@/lib/log';
+import { resetQueryCache } from '@/lib/queryClient';
 import { STORAGE_KEYS, plainStorage, secureStorage } from '@/lib/storage';
 import { unregisterPush } from '@/lib/push';
 import { localWallet, restoreWalletMode, wallet } from '@/lib/wallet';
@@ -151,12 +152,15 @@ export const useSession = create<SessionState>((set, get) => ({
   },
 
   async signIn() {
+    const previousAddress = get().address;
     const address = get().address ?? (await get().connectWallet());
     set({ error: null });
     try {
       const session = await loginWithSep10(address);
       await secureStorage.set(STORAGE_KEYS.jwt, session.token);
       const role = session.user?.role ?? null;
+      // Başka bir cüzdana geçildiyse önceki hesabın önbelleği atılmalı.
+      if (previousAddress && previousAddress !== address) resetQueryCache();
       await persist({ address, role, expiresAt: session.expiresAt });
       set({
         status: 'signed_in',
@@ -195,6 +199,9 @@ export const useSession = create<SessionState>((set, get) => ({
     const expiresAt = Number.isFinite(expiresAtMs) ? expiresAtMs : get().expiresAt;
     await secureStorage.set(STORAGE_KEYS.jwt, token);
     await persist({ address, role: user.role, expiresAt });
+    // Rol yeni belirlendi: rol'e göre gövde döndüren uçların (ör. /dashboard)
+    // önbellekteki eski gövdesi artık yanlış tipte.
+    resetQueryCache();
     set({
       profile: user,
       role: user.role,
@@ -221,6 +228,7 @@ export const useSession = create<SessionState>((set, get) => ({
     if (get().status === 'signed_in') await unregisterPush();
     await clearStoredSession();
     await wallet.disconnect().catch(() => undefined);
+    resetQueryCache();
     set({
       status: 'signed_out',
       address: null,
@@ -244,6 +252,7 @@ export const useSession = create<SessionState>((set, get) => ({
       plainStorage.remove(STORAGE_KEYS.walletMode),
       plainStorage.remove(STORAGE_KEYS.onboardingSeen),
     ]);
+    resetQueryCache();
     debugLog('session', 'cihazdaki oturum ve cüzdan verisi silindi');
     set({
       status: 'signed_out',
@@ -310,6 +319,7 @@ registerAuthBridge({
 
   onSessionExpired() {
     void clearStoredSession();
+    resetQueryCache();
     useSession.setState({
       status: 'signed_out',
       role: null,

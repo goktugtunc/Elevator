@@ -8,24 +8,19 @@ import {
   Inter_800ExtraBold,
   useFonts,
 } from '@expo-google-fonts/inter';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClientProvider } from '@tanstack/react-query';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
+import { queryClient } from '@/lib/queryClient';
 import { usePushNotifications } from '@/lib/usePushNotifications';
 import { colors } from '@/theme';
 import { useSession } from '@/store/session';
 
 SplashScreen.preventAutoHideAsync().catch(() => undefined);
-
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: { staleTime: 15_000, retry: 1, refetchOnWindowFocus: false },
-  },
-});
 
 export default function RootLayout() {
   const [fontsLoaded] = useFonts({

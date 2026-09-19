@@ -40,9 +40,9 @@ export default function CustomerActivity() {
   const [sheetOpen, setSheetOpen] = useState(false);
 
   const dash = useQuery({
-    queryKey: ['dashboard'],
+    queryKey: ['dashboard', 'customer'],
     queryFn: dashboardApi.get,
-    select: (d) => d as CustomerDashboardOut,
+    select: (d): CustomerDashboardOut | null => (d.role === 'customer' ? d : null),
   });
 
   const activity = useQuery({

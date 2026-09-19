@@ -28,9 +28,9 @@ export default function CustomerDashboard() {
   const router = useRouter();
 
   const dash = useQuery({
-    queryKey: ['dashboard'],
+    queryKey: ['dashboard', 'customer'],
     queryFn: dashboardApi.get,
-    select: (d) => d as CustomerDashboardOut,
+    select: (d): CustomerDashboardOut | null => (d.role === 'customer' ? d : null),
   });
 
   return (
@@ -40,7 +40,12 @@ export default function CustomerDashboard() {
       />
       <View style={styles.body}>
         <AsyncBoundary query={dash}>
-          {(d) => (
+          {(d) =>
+            !d ? (
+              <Text variant="caption" color="text2">
+                Loading your portfolio…
+              </Text>
+            ) : (
             <>
               <Card style={styles.hero}>
                 <Text variant="caption" color="text2">
@@ -153,14 +158,15 @@ export default function CustomerDashboard() {
 
               <Section title="Your listing activity">
                 <Card style={styles.interactions}>
-                  <Metric label="Listings" value={d.listing_interactions.listings ?? 0} />
-                  <Metric label="Views" value={d.listing_interactions.views ?? 0} />
-                  <Metric label="Likes" value={d.listing_interactions.likes ?? 0} />
-                  <Metric label="Offers" value={d.listing_interactions.offers ?? 0} />
+                  <Metric label="Listings" value={d.listing_interactions?.listings ?? 0} />
+                  <Metric label="Views" value={d.listing_interactions?.views ?? 0} />
+                  <Metric label="Likes" value={d.listing_interactions?.likes ?? 0} />
+                  <Metric label="Offers" value={d.listing_interactions?.offers ?? 0} />
                 </Card>
               </Section>
             </>
-          )}
+            )
+          }
         </AsyncBoundary>
       </View>
     </Screen>
