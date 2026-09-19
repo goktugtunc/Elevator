@@ -1,29 +1,93 @@
 import { http } from './client';
 import type {
+  AgreementOut,
+  AnchorInfoOut,
+  AnchorSessionOut,
+  AnchorTransactionListOut,
+  AnchorTransactionOut,
   AssetOut,
   AuthMeOut,
+  ActivityItemOut,
   ConfigOut,
+  ConversationOut,
+  ConversationsUnreadOut,
+  CustomerDashboardOut,
+  DepositInfoOut,
   DiscoverActionOut,
   DiscoverFeedOut,
+  DiscoverRemainingOut,
   FollowOut,
+  FxOut,
+  FxConvertOut,
   InteractionAction,
   InteractionTargetType,
+  InteractiveOut,
+  KycOut,
+  ListingCountsOut,
+  ListingCreateIn,
+  ListingDetailOut,
   ListingKind,
   ListingOut,
+  ListingUpdateIn,
   LoginOut,
+  MarkReadOut,
+  MarketCategory,
   MeOut,
+  MessageOut,
+  MessagesPageOut,
+  NotificationCategory,
+  NotificationOut,
+  OfferAcceptOut,
   OfferCreateIn,
   OfferOut,
+  OfferStatsOut,
+  OfferStatus,
+  Page,
+  PendingTxOut,
+  QuoteOut,
+  RatingCreateIn,
+  RatingCreatedOut,
+  RatingOut,
   RegisterIn,
+  RegisterOut,
+  RiskLevel,
+  RiskProfile,
   Sep10ChallengeOut,
+  TraderCardOut,
+  TraderDashboardOut,
+  TraderProfileOut,
+  TradeOut,
+  TradeTxIn,
+  TxSubmitOut,
+  UnreadCountOut,
+  UnsignedTxOut,
+  UserOut,
+  UserUpdateIn,
+  ValueHistoryOut,
+  WalletOut,
+  WalletPaymentIn,
+  TrustlineIn,
 } from './types';
 
 /**
- * TraderKirala API — <https://mobilback.yolalapp.com> (92 uç, şema: /docs).
+ * TraderKirala API — <https://mobilback.yolalapp.com> (92 uç, şema: /openapi.json).
  * Tüm uçlar `/api/v1` öneki altında; `/health` önek dışındadır.
- * Tipler `./types.ts` içinde sunucu şemasıyla birebir.
+ *
+ * Tipler `./schema.ts` içinde sunucunun OpenAPI şemasından üretilir; buradaki
+ * imzalar yalnızca yol ve sorgu parametrelerini bağlar. Sayfalama **offset**
+ * tabanlıdır (`limit` / `offset`), tek istisna Keşfet akışıdır (`cursor`).
  */
 const V1 = '/api/v1';
+
+/**
+ * Offset tabanlı sayfalama — listelerin ortak parametreleri.
+ * `interface` değil `type`: sorgu nesneleri `QueryParams` indeks imzasına ancak
+ * tip takma adı olduklarında uyar.
+ */
+export type PageParams = {
+  limit?: number;
+  offset?: number;
+};
 
 // --- Meta ---
 export const metaApi = {
@@ -31,7 +95,13 @@ export const metaApi = {
   config: () => http.get<ConfigOut>(`${V1}/config`, undefined, false),
   health: () =>
     http.get<{ status: string; db?: string; version?: string }>('/health', undefined, false),
-  assets: () => http.get<AssetOut[]>(`${V1}/assets`),
+  assets: (params?: { base_only?: boolean; onchain_only?: boolean }) =>
+    http.get<AssetOut[]>(`${V1}/assets`, params),
+  asset: (assetId: string) => http.get<AssetOut>(`${V1}/assets/${assetId}`),
+  /** Gösterim için USD → TRY vb. kurlar. */
+  fx: () => http.get<FxOut>(`${V1}/fx`),
+  fxConvert: (amountUsd: string | number) =>
+    http.get<FxConvertOut>(`${V1}/fx/convert`, { amount_usd: amountUsd }),
 };
 
 // --- Kimlik doğrulama (SEP-10) ---
@@ -59,18 +129,21 @@ export const authApi = {
 
 // --- Kullanıcı & profil ---
 export const usersApi = {
-  register: (payload: RegisterIn) => http.post<MeOut>(`${V1}/users/register`, payload),
+  /** Profil **ve rolü taşıyan yeni token** döndürür; token saklanmalıdır. */
+  register: (payload: RegisterIn) => http.post<RegisterOut>(`${V1}/users/register`, payload),
   me: () => http.get<MeOut>(`${V1}/users/me`),
-  updateMe: (payload: Partial<RegisterIn>) => http.patch<MeOut>(`${V1}/users/me`, payload),
-  byUsername: (username: string) => http.get<MeOut>(`${V1}/users/by-username/${username}`),
+  updateMe: (payload: UserUpdateIn) => http.patch<MeOut>(`${V1}/users/me`, payload),
+  byUsername: (username: string) => http.get<UserOut>(`${V1}/users/by-username/${username}`),
+  byId: (userId: string) => http.get<UserOut>(`${V1}/users/${userId}`),
 };
 
 // --- Keşfet ---
 export const discoverApi = {
-  /** Rol'e göre sunucu tarafında seçilen kart akışı (müşteriye hizmet, trader'a sermaye ilanları). */
-  feed: (params?: { limit?: number; cursor?: string; market?: string }) =>
+  /** Rol'e göre sunucu tarafında seçilen kart akışı (tek cursor'lı uç). */
+  feed: (params?: { limit?: number; cursor?: string; market?: MarketCategory }) =>
     http.get<DiscoverFeedOut>(`${V1}/discover`, params),
-  remaining: () => http.get<{ remaining: number }>(`${V1}/discover/remaining`),
+  remaining: (market?: MarketCategory) =>
+    http.get<DiscoverRemainingOut>(`${V1}/discover/remaining`, { market }),
   /** pass | like | save | follow | view | offer_request */
   action: (targetType: InteractionTargetType, targetId: string, action: InteractionAction) =>
     http.post<DiscoverActionOut>(`${V1}/discover/${targetType}/${targetId}/action`, { action }),
@@ -80,13 +153,23 @@ export const discoverApi = {
 
 // --- İlanlar ---
 export const listingsApi = {
-  list: (params?: { kind?: ListingKind; cursor?: string; limit?: number }) =>
-    http.get<{ items: ListingOut[]; next_cursor?: string | null }>(`${V1}/listings`, params),
-  mine: () => http.get<{ items: ListingOut[] }>(`${V1}/listings/mine`),
-  mineCounts: () => http.get<Record<string, number>>(`${V1}/listings/mine/counts`),
-  saved: () => http.get<{ items: ListingOut[] }>(`${V1}/listings/saved`),
-  byId: (id: string) => http.get<ListingOut>(`${V1}/listings/${id}`),
-  create: (payload: Record<string, unknown>) => http.post<ListingOut>(`${V1}/listings`, payload),
+  list: (
+    params?: PageParams & {
+      kind?: ListingKind;
+      market?: MarketCategory;
+      risk_profile?: RiskProfile;
+      q?: string;
+      sort?: 'newest' | 'popular' | 'amount';
+    },
+  ) => http.get<Page<ListingOut>>(`${V1}/listings`, params),
+  mine: (params?: PageParams & { status?: string }) =>
+    http.get<Page<ListingOut>>(`${V1}/listings/mine`, params),
+  mineCounts: () => http.get<ListingCountsOut>(`${V1}/listings/mine/counts`),
+  saved: (params?: PageParams) => http.get<Page<ListingOut>>(`${V1}/listings/saved`, params),
+  byId: (id: string) => http.get<ListingDetailOut>(`${V1}/listings/${id}`),
+  create: (payload: ListingCreateIn) => http.post<ListingOut>(`${V1}/listings`, payload),
+  update: (id: string, payload: ListingUpdateIn) =>
+    http.patch<ListingOut>(`${V1}/listings/${id}`, payload),
   pause: (id: string) => http.post<ListingOut>(`${V1}/listings/${id}/pause`),
   resume: (id: string) => http.post<ListingOut>(`${V1}/listings/${id}/resume`),
   close: (id: string) => http.post<ListingOut>(`${V1}/listings/${id}/close`),
@@ -95,113 +178,149 @@ export const listingsApi = {
 // --- Teklifler ---
 export const offersApi = {
   create: (payload: OfferCreateIn) => http.post<OfferOut>(`${V1}/offers`, payload),
-  list: (params?: { status?: string; role?: string }) =>
-    http.get<{ items: OfferOut[] }>(`${V1}/offers`, params),
+  /** `box`: inbox = bana gelenler, outbox = benim gönderdiklerim. */
+  list: (
+    params?: PageParams & {
+      box?: 'inbox' | 'outbox' | 'all';
+      status?: OfferStatus;
+      listing_id?: string;
+    },
+  ) => http.get<Page<OfferOut>>(`${V1}/offers`, params),
   byId: (id: string) => http.get<OfferOut>(`${V1}/offers/${id}`),
-  accept: (id: string) => http.post<OfferOut>(`${V1}/offers/${id}/accept`),
-  reject: (id: string) => http.post<OfferOut>(`${V1}/offers/${id}/reject`),
+  /** Kabul, taslak sözleşmeyi (`agreement`) doğurur. */
+  accept: (id: string) => http.post<OfferAcceptOut>(`${V1}/offers/${id}/accept`),
+  reject: (id: string, reason?: string) =>
+    http.post<OfferOut>(`${V1}/offers/${id}/reject`, { reason }),
   withdraw: (id: string) => http.post<OfferOut>(`${V1}/offers/${id}/withdraw`),
-  stats: () => http.get<Record<string, number>>(`${V1}/offers/stats`),
+  stats: () => http.get<OfferStatsOut>(`${V1}/offers/stats`),
 };
 
 // --- Trader'lar ---
 export const tradersApi = {
-  list: (params?: { cursor?: string; limit?: number }) =>
-    http.get<{ items: MeOut[] }>(`${V1}/traders`, params),
-  profile: (traderId: string) => http.get<MeOut>(`${V1}/traders/${traderId}/profile`),
+  list: (
+    params?: PageParams & {
+      sort?: 'rating' | 'return' | 'capital' | 'followers' | 'newest';
+      market?: MarketCategory;
+      risk_level?: RiskLevel;
+      q?: string;
+    },
+  ) => http.get<Page<TraderCardOut>>(`${V1}/traders`, params),
+  profile: (traderId: string, params?: { range?: '7d' | '30d' | '90d' | '1y' | 'all'; trades?: number }) =>
+    http.get<TraderProfileOut>(`${V1}/traders/${traderId}/profile`, params),
   follow: (traderId: string) => http.post<FollowOut>(`${V1}/traders/${traderId}/follow`),
   unfollow: (traderId: string) => http.delete<FollowOut>(`${V1}/traders/${traderId}/follow`),
-  ratings: (traderId: string) =>
-    http.get<{ items: unknown[] }>(`${V1}/traders/${traderId}/ratings`),
+  ratings: (traderId: string, params?: PageParams) =>
+    http.get<Page<RatingOut>>(`${V1}/traders/${traderId}/ratings`, params),
 };
 
 // --- Panel & hareketler ---
 export const dashboardApi = {
-  get: () => http.get<Record<string, unknown>>(`${V1}/dashboard`),
+  /** Rol'e göre sunucu iki farklı gövdeden birini döndürür (`role` ayırt eder). */
+  get: () => http.get<TraderDashboardOut | CustomerDashboardOut>(`${V1}/dashboard`),
 };
 
 export const activityApi = {
-  feed: (params?: { cursor?: string; limit?: number }) =>
-    http.get<{ items: unknown[]; next_cursor?: string | null }>(`${V1}/activity`, params),
+  feed: (params?: PageParams & { trader_id?: string; state?: 'open' | 'closed' }) =>
+    http.get<Page<ActivityItemOut>>(`${V1}/activity`, params),
 };
 
 // --- Sözleşmeler (agreements) ---
 export const agreementsApi = {
-  list: (params?: { status?: string }) =>
-    http.get<{ items: unknown[] }>(`${V1}/agreements`, params),
-  byId: (id: string) => http.get<Record<string, unknown>>(`${V1}/agreements/${id}`),
-  quote: (id: string) => http.get<Record<string, unknown>>(`${V1}/agreements/${id}/quote`),
-  trades: (id: string) => http.get<{ items: unknown[] }>(`${V1}/agreements/${id}/trades`),
-  valueHistory: (id: string) =>
-    http.get<{ items: unknown[] }>(`${V1}/agreements/${id}/value-history`),
-  /** Zincir üstü işlem XDR'ı üretir (fund / settle / cancel …). */
+  list: (params?: PageParams & { role?: string; status?: string }) =>
+    http.get<Page<AgreementOut>>(`${V1}/agreements`, params),
+  byId: (id: string, refresh?: boolean) =>
+    http.get<AgreementOut>(`${V1}/agreements/${id}`, { refresh }),
+  quote: (
+    id: string,
+    params: {
+      token_in: string;
+      token_out: string;
+      amount_in: string;
+      slippage_bps?: number;
+      deadline_seconds?: number;
+    },
+  ) => http.get<QuoteOut>(`${V1}/agreements/${id}/quote`, params),
+  trades: (id: string, params?: PageParams) =>
+    http.get<Page<TradeOut>>(`${V1}/agreements/${id}/trades`, params),
+  valueHistory: (id: string, range?: '24h' | '7d' | '30d' | '90d' | 'all') =>
+    http.get<ValueHistoryOut>(`${V1}/agreements/${id}/value-history`, { range }),
+  /** Zincir üstü işlem XDR'ı üretir: open | propose | fund | accept | cancel | settle. */
   buildTx: (id: string, action: string, payload?: Record<string, unknown>) =>
-    http.post<{ xdr: string; pending_id?: string }>(`${V1}/agreements/${id}/tx/${action}`, payload),
-  buildTradeTx: (id: string, payload: Record<string, unknown>) =>
-    http.post<{ xdr: string; pending_id?: string }>(`${V1}/agreements/${id}/tx/trade`, payload),
-  rate: (id: string, payload: Record<string, unknown>) =>
-    http.post<Record<string, unknown>>(`${V1}/agreements/${id}/rating`, payload),
+    http.post<UnsignedTxOut>(`${V1}/agreements/${id}/tx/${action}`, payload ?? {}),
+  buildTradeTx: (id: string, payload: TradeTxIn) =>
+    http.post<UnsignedTxOut>(`${V1}/agreements/${id}/tx/trade`, payload),
+  rate: (id: string, payload: RatingCreateIn) =>
+    http.post<RatingCreatedOut>(`${V1}/agreements/${id}/rating`, payload),
+  rating: (id: string) => http.get<RatingOut>(`${V1}/agreements/${id}/rating`),
+};
+
+export const tradesApi = {
+  /** Yalnızca not/görünürlük güncellenir; işlemin kendisi zincirdedir. */
+  update: (tradeId: string, payload: { note?: string | null }) =>
+    http.patch<TradeOut>(`${V1}/trades/${tradeId}`, payload),
 };
 
 // --- İmzalı işlem gönderimi ---
 export const txApi = {
   submit: (signedXdr: string, pendingId?: string) =>
-    http.post<{ hash?: string; status: string }>(`${V1}/tx/submit`, {
-      xdr: signedXdr,
-      pending_id: pendingId,
-    }),
-  status: (pendingId: string) =>
-    http.get<{ status: string; hash?: string }>(`${V1}/tx/${pendingId}`),
+    http.post<TxSubmitOut>(`${V1}/tx/submit`, { xdr: signedXdr, pending_id: pendingId }),
+  status: (pendingId: string) => http.get<PendingTxOut>(`${V1}/tx/${pendingId}`),
 };
 
 // --- Mesajlar ---
 export const conversationsApi = {
-  list: () => http.get<{ items: unknown[] }>(`${V1}/conversations`),
-  unreadCount: () => http.get<{ count: number }>(`${V1}/conversations/unread-count`),
-  byId: (id: string) => http.get<Record<string, unknown>>(`${V1}/conversations/${id}`),
-  messages: (id: string, params?: { cursor?: string }) =>
-    http.get<{ items: unknown[] }>(`${V1}/conversations/${id}/messages`, params),
+  list: (params?: PageParams) => http.get<Page<ConversationOut>>(`${V1}/conversations`, params),
+  unreadCount: () => http.get<ConversationsUnreadOut>(`${V1}/conversations/unread-count`),
+  byId: (id: string) => http.get<ConversationOut>(`${V1}/conversations/${id}`),
+  messages: (id: string, params?: { after?: string; before?: string; limit?: number }) =>
+    http.get<MessagesPageOut>(`${V1}/conversations/${id}/messages`, params),
   send: (id: string, body: string) =>
-    http.post<Record<string, unknown>>(`${V1}/conversations/${id}/messages`, { body }),
-  markRead: (id: string) => http.post<{ ok: boolean }>(`${V1}/conversations/${id}/read`),
+    http.post<MessageOut>(`${V1}/conversations/${id}/messages`, { body }),
+  markRead: (id: string) => http.post<MarkReadOut>(`${V1}/conversations/${id}/read`),
 };
 
 // --- Bildirimler ---
 export const notificationsApi = {
-  list: (params?: { cursor?: string }) =>
-    http.get<{ items: unknown[]; next_cursor?: string | null }>(`${V1}/notifications`, params),
-  unreadCount: () => http.get<{ count: number }>(`${V1}/notifications/unread-count`),
-  markAllRead: () => http.post<{ ok: boolean }>(`${V1}/notifications/read`),
-  markRead: (id: string) => http.post<{ ok: boolean }>(`${V1}/notifications/${id}/read`),
+  list: (params?: PageParams & { category?: NotificationCategory; unread_only?: boolean }) =>
+    http.get<Page<NotificationOut>>(`${V1}/notifications`, params),
+  byId: (id: string) => http.get<NotificationOut>(`${V1}/notifications/${id}`),
+  unreadCount: () => http.get<UnreadCountOut>(`${V1}/notifications/unread-count`),
+  markAllRead: (ids?: string[]) => http.post<MarkReadOut>(`${V1}/notifications/read`, { ids }),
+  markRead: (id: string) => http.post<MarkReadOut>(`${V1}/notifications/${id}/read`),
   setPushToken: (token: string) =>
     http.put<{ ok: boolean }>(`${V1}/notifications/push-token`, { expo_push_token: token }),
 };
 
 // --- Cüzdan & anchor ---
 export const walletApi = {
-  get: () => http.get<Record<string, unknown>>(`${V1}/wallet`),
-  depositInfo: () => http.get<Record<string, unknown>>(`${V1}/wallet/deposit-info`),
-  buildPaymentTx: (payload: Record<string, unknown>) =>
-    http.post<{ xdr: string }>(`${V1}/wallet/tx/payment`, payload),
-  buildTrustlineTx: (payload: Record<string, unknown>) =>
-    http.post<{ xdr: string }>(`${V1}/wallet/tx/trustline`, payload),
+  get: (movements?: boolean) => http.get<WalletOut>(`${V1}/wallet`, { movements }),
+  depositInfo: () => http.get<DepositInfoOut>(`${V1}/wallet/deposit-info`),
+  buildPaymentTx: (payload: WalletPaymentIn) =>
+    http.post<UnsignedTxOut>(`${V1}/wallet/tx/payment`, payload),
+  buildTrustlineTx: (payload: TrustlineIn) =>
+    http.post<UnsignedTxOut>(`${V1}/wallet/tx/trustline`, payload),
 };
 
 export const anchorApi = {
-  info: () => http.get<Record<string, unknown>>(`${V1}/anchor/info`),
-  session: () => http.get<Record<string, unknown>>(`${V1}/anchor/auth/session`),
+  info: (lang?: string) => http.get<AnchorInfoOut>(`${V1}/anchor/info`, { lang }),
+  session: () => http.get<AnchorSessionOut>(`${V1}/anchor/auth/session`),
+  /** SEP-24 interactive URL döner; `expo-web-browser` ile açılır. */
   deposit: (payload: Record<string, unknown>) =>
-    http.post<{ url?: string; id?: string }>(`${V1}/anchor/deposit`, payload),
+    http.post<InteractiveOut>(`${V1}/anchor/deposit`, payload),
   withdraw: (payload: Record<string, unknown>) =>
-    http.post<{ url?: string; id?: string }>(`${V1}/anchor/withdraw`, payload),
-  transactions: () => http.get<{ items: unknown[] }>(`${V1}/anchor/transactions`),
-  transaction: (ref: string) =>
-    http.get<Record<string, unknown>>(`${V1}/anchor/transactions/${ref}`),
-};
-
-// --- Kur ---
-export const fxApi = {
-  rates: () => http.get<Record<string, unknown>>(`${V1}/fx`, undefined, false),
-  convert: (params: { amount: number | string; from: string; to: string }) =>
-    http.get<Record<string, unknown>>(`${V1}/fx/convert`, params, false),
+    http.post<InteractiveOut>(`${V1}/anchor/withdraw`, payload),
+  kyc: (payload: Record<string, unknown>) => http.post<KycOut>(`${V1}/anchor/kyc`, payload),
+  transactions: (
+    params?: PageParams & {
+      kind?: 'deposit' | 'withdraw';
+      status?: string;
+      asset_code?: string;
+      sync?: boolean;
+    },
+  ) => http.get<AnchorTransactionListOut>(`${V1}/anchor/transactions`, params),
+  transaction: (ref: string, refresh?: boolean) =>
+    http.get<AnchorTransactionOut>(`${V1}/anchor/transactions/${ref}`, { refresh }),
+  /** Çekimde anchor'a yapılacak ödemenin XDR'ı. */
+  buildWithdrawPaymentTx: (ref: string, payload?: Record<string, unknown>) =>
+    http.post<UnsignedTxOut>(`${V1}/anchor/transactions/${ref}/tx/payment`, payload ?? {}),
 };

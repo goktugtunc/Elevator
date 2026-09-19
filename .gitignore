@@ -25,3 +25,7 @@ target/
 
 # Claude desktop uygulamasının sohbet çıktıları (repoya girmez)
 Claude outputs/
+
+# Yerel ekran görüntüleri (test sırasında telefondan gelenler)
+WhatsApp Image *
+*.jpeg

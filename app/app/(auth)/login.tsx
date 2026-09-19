@@ -31,6 +31,7 @@ export default function Login() {
   const clearError = useSession((s) => s.clearError);
   const pairingUri = useSession((s) => s.pairingUri);
   const cancelPairing = useSession((s) => s.cancelPairing);
+  const resetAll = useSession((s) => s.resetAll);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -204,6 +205,18 @@ export default function Login() {
           onPress={() => router.push('/(auth)/register/role')}
         />
       </View>
+
+      {/* Sıfırdan test: cihazdaki cüzdan ve oturum silinir, bağlanınca yeni adres üretilir. */}
+      <Button
+        title="Reset app data"
+        variant="ghost"
+        size="sm"
+        onPress={async () => {
+          setError(null);
+          await resetAll();
+          router.replace('/');
+        }}
+      />
 
       <WalletConnectSheet uri={pairingUri} onClose={cancelPairing} />
     </Screen>

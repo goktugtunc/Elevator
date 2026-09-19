@@ -42,10 +42,13 @@ export function registerAuthBridge(bridge: AuthBridge): void {
 
 type Method = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
+/** Sunucu boolean sorgu parametreleri de alıyor (unread_only, refresh, movements…). */
+export type QueryParams = Record<string, string | number | boolean | undefined>;
+
 interface RequestOptions {
   body?: unknown;
   auth?: boolean;
-  query?: Record<string, string | number | undefined>;
+  query?: QueryParams;
   /** İçeride kullanılır: 401 sonrası tekrar denemede sonsuz döngüyü engeller. */
   retried?: boolean;
 }
@@ -113,7 +116,7 @@ function safeJson(text: string): unknown {
 }
 
 export const http = {
-  get: <T>(path: string, query?: Record<string, string | number | undefined>, auth = true) =>
+  get: <T>(path: string, query?: QueryParams, auth = true) =>
     request<T>('GET', path, { query, auth }),
   post: <T>(path: string, body?: unknown, auth = true) => request<T>('POST', path, { body, auth }),
   put: <T>(path: string, body?: unknown) => request<T>('PUT', path, { body }),

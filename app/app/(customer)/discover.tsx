@@ -29,7 +29,7 @@ export default function CustomerDiscover() {
 
   const act = useMutation({
     mutationFn: ({ card, action }: { card: DiscoverCardOut; action: InteractionAction }) =>
-      discoverApi.action(card.target_type, card.target_id, action),
+      discoverApi.action(card.target_type ?? 'listing', card.target_id, action),
     onError: (err) => setNotice({ tone: 'error', text: userMessage(err) }),
   });
 

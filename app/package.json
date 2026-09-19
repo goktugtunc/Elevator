@@ -12,7 +12,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "expo lint",
     "format": "prettier --write \"{app,src}/**/*.{ts,tsx}\"",
-    "check": "npm run typecheck && npm run lint"
+    "check": "npm run typecheck && npm run lint",
+    "gen:api": "curl -s https://mobilback.yolalapp.com/openapi.json -o /tmp/tk-openapi.json && python3 scripts/gen-api-types.py"
   },
   "dependencies": {
     "@creit.tech/stellar-wallets-kit": "^2.6.0",

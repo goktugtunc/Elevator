@@ -1,12 +1,13 @@
 import { create } from 'zustand';
 
 import { authApi, registerAuthBridge, usersApi } from '@/lib/api';
-import type { MeOut, RegisterIn, UserRole } from '@/lib/api/types';
+import { ApiError } from '@/lib/api/client';
+import type { MeOut, RegisterIn, RegisterOut, UserRole } from '@/lib/api/types';
 import { isExpired, loginWithSep10 } from '@/lib/auth';
 import { userMessage } from '@/lib/errors';
 import { debugError, debugLog } from '@/lib/log';
 import { STORAGE_KEYS, plainStorage, secureStorage } from '@/lib/storage';
-import { restoreWalletMode, wallet } from '@/lib/wallet';
+import { localWallet, restoreWalletMode, wallet } from '@/lib/wallet';
 import type { NativeWalletMode } from '@/lib/wallet';
 
 /**
@@ -43,6 +44,8 @@ interface SessionState {
   register: (payload: RegisterIn) => Promise<void>;
   refreshProfile: () => Promise<void>;
   signOut: () => Promise<void>;
+  /** Cihazdaki her izi siler — cüzdan anahtarı ve onboarding dâhil (test için). */
+  resetAll: () => Promise<void>;
   clearError: () => void;
 }
 
@@ -169,10 +172,36 @@ export const useSession = create<SessionState>((set, get) => ({
   },
 
   async register(payload) {
-    const profile = await usersApi.register(payload);
-    const address = get().address ?? profile.stellar_address;
-    await persist({ address, role: profile.role, expiresAt: get().expiresAt });
-    set({ profile, role: profile.role, registered: true, address, status: 'signed_in' });
+    // Sunucu profili **ve rolü taşıyan yeni bir token** döndürür (RegisterOut);
+    // eski token rolsüzdür, bu yüzden yenisi saklanır.
+    let out: RegisterOut;
+    try {
+      out = await usersApi.register(payload);
+    } catch (err) {
+      // 409 iki anlama gelir: cüzdan zaten kayıtlı ya da kullanıcı adı alınmış.
+      // İlkinde yeni bir SEP-10 girişi rolü taşıyan token'ı getirir ve akış açılır;
+      // rol yine gelmezse çakışma kullanıcı adındadır, hata olduğu gibi yükselir.
+      if (err instanceof ApiError && err.status === 409) {
+        await get().signIn();
+        if (get().role) return;
+      }
+      throw err;
+    }
+    const { user, token, expires_at } = out;
+    const address = get().address ?? user.stellar_address;
+    const expiresAtMs = expires_at ? Date.parse(expires_at) : NaN;
+    const expiresAt = Number.isFinite(expiresAtMs) ? expiresAtMs : get().expiresAt;
+    await secureStorage.set(STORAGE_KEYS.jwt, token);
+    await persist({ address, role: user.role, expiresAt });
+    set({
+      profile: user,
+      role: user.role,
+      registered: true,
+      address,
+      expiresAt,
+      status: 'signed_in',
+    });
+    debugLog('auth', 'kayıt tamam', { role: user.role, username: user.username });
   },
 
   async refreshProfile() {
@@ -196,6 +225,31 @@ export const useSession = create<SessionState>((set, get) => ({
       registered: false,
       expiresAt: null,
       pairingUri: null,
+      error: null,
+    });
+  },
+
+  async resetAll() {
+    await clearStoredSession();
+    await wallet.disconnect().catch(() => undefined);
+    // signOut'tan farkı: uygulama içi cüzdanın gizli anahtarı ve tercihler de gider,
+    // böylece bir sonraki bağlanışta yeni bir adres üretilir — sıfırdan test.
+    await localWallet.forget().catch(() => undefined);
+    await Promise.all([
+      plainStorage.remove(STORAGE_KEYS.walletMode),
+      plainStorage.remove(STORAGE_KEYS.onboardingSeen),
+    ]);
+    debugLog('session', 'cihazdaki oturum ve cüzdan verisi silindi');
+    set({
+      status: 'signed_out',
+      address: null,
+      role: null,
+      profile: null,
+      registered: false,
+      expiresAt: null,
+      pairingUri: null,
+      walletMode: null,
+      onboardingSeen: false,
       error: null,
     });
   },

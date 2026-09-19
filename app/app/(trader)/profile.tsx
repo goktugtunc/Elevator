@@ -1,10 +1,12 @@
 import { Placeholder, Screen, ScreenHeader } from '@/components/layout';
+import { SessionActions } from '@/components/wallet';
 
 /** Figma 8b Profil · Trader (node 27:569) — sprint görevi için bkz. SPRINT-1.md */
 export default function TraderProfile() {
   return (
     <Screen riskStrip={false} padded={false}>
       <ScreenHeader title="Profile" />
+      <SessionActions />
       <Placeholder
         screen="8b Profile · Trader"
         figmaNode="27:569"

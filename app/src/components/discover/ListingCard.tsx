@@ -54,7 +54,7 @@ export function ListingCard({ card }: { card: DiscoverCardOut }) {
       </View>
 
       <View style={styles.pills}>
-        {listing.markets.map((m) => (
+        {(listing.markets ?? []).map((m) => (
           <Pill key={m} label={MARKET_LABEL[m] ?? m} tone="navy" />
         ))}
         {listing.duration_days ? <Pill label={formatDuration(listing.duration_days)} /> : null}
@@ -67,8 +67,8 @@ export function ListingCard({ card }: { card: DiscoverCardOut }) {
             <Text variant="caption" color="text2">
               Total return
             </Text>
-            <Text variant="numeric" color={pnlColor(stats.total_return_bps)}>
-              {formatBpsSigned(stats.total_return_bps)}
+            <Text variant="numeric" color={pnlColor(stats.total_return_bps ?? 0)}>
+              {formatBpsSigned(stats.total_return_bps ?? 0)}
             </Text>
           </View>
           <View style={{ flex: 1 }}>
@@ -92,14 +92,14 @@ export function ListingCard({ card }: { card: DiscoverCardOut }) {
       <View style={styles.stats}>
         {isService ? (
           <>
-            {stats ? (
+            {stats?.max_drawdown_bps != null ? (
               <Stat
                 label="Max drawdown"
                 value={formatBpsSigned(-Math.abs(stats.max_drawdown_bps))}
                 signed={-Math.abs(stats.max_drawdown_bps)}
               />
             ) : null}
-            {listing.commission_bps !== null ? (
+            {listing.commission_bps != null ? (
               <Stat label="Commission" value={formatBps(listing.commission_bps)} />
             ) : null}
             {listing.min_capital ? (
