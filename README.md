@@ -109,6 +109,7 @@ flowchart LR
 
 - [SPRINT-1.md](SPRINT-1.md) — sprint planı ve görev listesi
 - [docs/design-system.md](docs/design-system.md) — Figma tasarım sistemi ↔ kod eşlemesi
+- [docs/mobil-test.md](docs/mobil-test.md) — Expo Go + iOS simülatörü ile cüzdan testi
 - [docs/gelistirme-notlari.md](docs/gelistirme-notlari.md) — teknik kararlar, birleşme noktaları, açık konular
 - Figma: `6ZxzvsYKarDglg0PGYRIgP` — TraderKirala Mobil Tasarım Sistemi
 

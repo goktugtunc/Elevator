@@ -99,7 +99,7 @@ Backend beklemeden ilerletilebilecek işler: **FE-12 / FE-14** (FE-07 bileşenle
 
 - 🟡 görevlerin uçtan uca doğrulaması ilgili BE-* ucu açılınca yapılacak; şu an ekranlar 404'ü hata durumu olarak gösteriyor (sahte veri yok).
 - **DoD-3 (Chrome 390px elle kontrol) hiçbir ekran için yapılmadı** — `cd app && npm run web`.
-- **Mobil cüzdan gerçek cihazda denenmedi.** Bu makinede Xcode/Android SDK kurulu olmadığı için simülatör açılamadı; ayrıca simülatörde cüzdan uygulaması olmadığından deep link zaten çalışmaz. Doğru test: `npx expo start` → QR'ı **Expo Go** ile telefonda aç → Lobstr/xBull yüklü cihazda "Connect wallet".
+- **Mobil cüzdan gerçek cihazda denenmedi.** Adım adım test yolu: [docs/mobil-test.md](docs/mobil-test.md). Bu makinede Xcode/Android SDK kurulu olmadığı için simülatör açılamadı (karar: Xcode kurulacak). Simülatöre cüzdan uygulaması kurulamadığından deep link orada çalışmaz; QR'ı gerçek telefondaki Lobstr/xBull ile okutmak çalışır.
 - WalletConnect proje kimliği `.env`'de boş; doldurulmadan mobil giriş başlamaz.
 - Keşfet aksiyonları için önerilen uçlar: `POST /listings/:id/requests` (müşteri teklif ister), `POST /listings/:id/offers` (trader teklif verir), `POST /listings/:id/saves` (trader kaydeder). Backend farklı isimlendirirse `endpoints.ts` güncellenir.
 - `Listing.owner` özeti (ad, baş harf, rating, 12 ay getiri, drawdown, sparkline, etiketler) `/listings` yanıtında gömülü bekleniyor; gelmezse kartta yalnızca cüzdan adresi görünür.
