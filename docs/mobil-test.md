@@ -118,7 +118,19 @@ Project ID istemci tarafında görünür bir değerdir (gizli anahtar değildir)
 
 Uzantıyı ve mobil uygulamayı **Testnet**'e almayı unutmayın (Freighter → Settings → Network).
 
-## 6. Bilinen sınırlar
+## 6. Sık karşılaşılan hatalar
+
+**`crypto.getRandomValues must be defined`** — `@noble/hashes` (stellar-sdk ve
+WalletConnect'in bağımlılığı) `globalThis.crypto`'yu **import anında** yakalar.
+Polyfill'ler `app/_layout.tsx` içinde kalırsa expo-router bazı rota dosyalarını
+daha önce değerlendirebildiği için crypto henüz tanımlı olmuyor. Çözüm: giriş
+noktası `app/index.js` — önce `./src/polyfills`, sonra `expo-router/entry`
+(`package.json → main: index.js`). Bu sıra değiştirilmemeli.
+
+Hata tekrar görülürse: `npx expo start --clear` ile önbelleği temizleyin ve
+Expo Go'da uygulamayı tamamen kapatıp yeniden açın.
+
+## 7. Bilinen sınırlar
 
 - SEP-10 girişi backend'in `/api/v1/auth/*` uçları açılana kadar hata gösterir
   (BE-02). Cüzdan bağlantısının kendisi backend'den bağımsız çalışır.

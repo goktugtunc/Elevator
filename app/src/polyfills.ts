@@ -1,33 +1,67 @@
 /**
  * Native tarafta @stellar/stellar-sdk ve WalletConnect için gerekli polyfill'ler.
- * Sıra önemli: TextEncoder → getRandomValues → Buffer. app/_layout.tsx'in İLK importu olmalı.
+ * **Uygulamanın ilk çalışan modülü olmalı** — giriş noktası `app/index.js`.
  *
- * Expo Go kısıtı: yalnızca Expo SDK modülleri ve Expo Go'ya gömülü kütüphaneler
- * kullanılabilir. Bu yüzden rastgelelik `react-native-get-random-values` (özel native
- * modül) yerine `expo-crypto` ile sağlanır — web'de tarayıcı zaten sağlar.
+ * Neden bu kadar erken: `@noble/hashes/crypto.js` (stellar-sdk ve WalletConnect'in
+ * bağımlılığı) `globalThis.crypto`'yu import anında yakalar; o an tanımlı değilse
+ * bir daha bakmaz ve "crypto.getRandomValues must be defined" hatası verir.
+ *
+ * Expo Go kısıtı: özel native modül kullanılamaz. Bu yüzden rastgelelik
+ * `react-native-get-random-values` yerine Expo SDK'nın `expo-crypto` modülünden
+ * gelir; web'de tarayıcı zaten sağladığı için polyfill devreye girmez.
  */
 import 'fast-text-encoding';
 
 import { Buffer } from 'buffer';
-import { getRandomValues } from 'expo-crypto';
+import { getRandomValues as expoGetRandomValues, randomUUID as expoRandomUUID } from 'expo-crypto';
+
+type MutableCrypto = {
+  getRandomValues?: unknown;
+  randomUUID?: unknown;
+};
 
 type Globals = typeof globalThis & {
   Buffer?: typeof Buffer;
-  crypto?: Crypto;
+  crypto?: MutableCrypto;
 };
 
 const g = globalThis as Globals;
 
-if (typeof g.crypto === 'undefined') {
-  g.crypto = {} as Crypto;
+function define(target: object, key: string, value: unknown): void {
+  try {
+    (target as Record<string, unknown>)[key] = value;
+    if ((target as Record<string, unknown>)[key] === value) return;
+  } catch {
+    // salt-okunur özellik: aşağıdaki defineProperty ile deneriz
+  }
+  try {
+    Object.defineProperty(target, key, { value, configurable: true, writable: true });
+  } catch {
+    // burada da başarısızsa yapacak bir şey yok; çağıran taraf hata verecek
+  }
 }
 
-if (typeof g.crypto.getRandomValues !== 'function') {
-  // expo-crypto imzası TypedArray alır; Crypto arayüzüyle uyumlu hâle getiriyoruz.
-  g.crypto.getRandomValues = (<T extends ArrayBufferView | null>(array: T): T =>
-    (array
-      ? getRandomValues(array as unknown as Uint8Array)
-      : array) as T) as Crypto['getRandomValues'];
+const getRandomValues = <T extends ArrayBufferView | null>(array: T): T =>
+  (array ? expoGetRandomValues(array as unknown as Uint8Array) : array) as T;
+
+if (!g.crypto || typeof g.crypto !== 'object') {
+  define(g, 'crypto', {});
+}
+
+const cryptoObj = g.crypto as MutableCrypto;
+
+if (typeof cryptoObj.getRandomValues !== 'function') {
+  define(cryptoObj, 'getRandomValues', getRandomValues);
+}
+
+// Bazı kütüphaneler (WalletConnect dâhil) randomUUID'yi doğrudan arıyor.
+if (typeof cryptoObj.randomUUID !== 'function') {
+  define(cryptoObj, 'randomUUID', () => expoRandomUUID());
+}
+
+// crypto nesnesi salt-okunur çıktıysa (bazı Hermes sürümleri) tümünü değiştir.
+if (typeof (g.crypto as MutableCrypto).getRandomValues !== 'function') {
+  define(g, 'crypto', { ...(g.crypto as object), getRandomValues, randomUUID: expoRandomUUID });
 }
 
 if (typeof g.Buffer === 'undefined') {
