@@ -1,37 +1,37 @@
 import { create } from 'zustand';
 
-import { profileApi, registerAuthBridge, type RegisterPayload } from '@/lib/api';
-import { isExpired, loginWithSep10, startSep7SignIn, waitForSep7 } from '@/lib/auth';
+import { authApi, registerAuthBridge, usersApi } from '@/lib/api';
+import type { MeOut, RegisterIn, UserRole } from '@/lib/api/types';
+import { isExpired, loginWithSep10 } from '@/lib/auth';
 import { userMessage } from '@/lib/errors';
+import { debugError, debugLog } from '@/lib/log';
 import { STORAGE_KEYS, plainStorage, secureStorage } from '@/lib/storage';
-import { localWallet, restoreWalletMode, wallet } from '@/lib/wallet';
+import { restoreWalletMode, wallet } from '@/lib/wallet';
 import type { NativeWalletMode } from '@/lib/wallet';
-import type { Role, UserProfile } from '@/types';
 
 /**
  * Oturum durumu — cüzdan adresi, rol, JWT.
  * Rol yönlendirmesi app/index.tsx'te bu store'a göre yapılır.
  *
- * JWT yenileme (FE-04): SEP-10'da yenileme token'ı yoktur; süre dolduğunda ya da
- * 401 geldiğinde challenge yeniden imzalatılır. Bu yüzden yenileme "sessiz" değil,
- * cüzdanda bir imza isteği açar. Başarısız olursa oturum kapatılır.
+ * Sunucu `LoginOut` ile token'ın yanında `registered` ve `user` döndürüyor;
+ * kayıtsız cüzdanda `role` null kalır ve kullanıcı kayıt akışına düşer.
+ * JWT süresi dolmadan `POST /auth/refresh` ile yenilenir — bu, cüzdanda
+ * yeni bir imza istemez (SEP-10 challenge'ı tekrar imzalamaya gerek yok).
  */
 export type SessionStatus = 'booting' | 'signed_out' | 'wallet_connected' | 'signed_in';
-
-/** İmza yolu. `sep7` imzayı cihazda üretmez; cüzdan imzalı XDR'ı backend'e gönderir. */
-export type WalletMode = NativeWalletMode | 'sep7';
 
 interface SessionState {
   status: SessionStatus;
   address: string | null;
-  role: Role | null;
-  profile: UserProfile | null;
-  /** JWT'nin bitiş anı (ms epoch); sunucu bildirmediyse null. */
+  role: UserRole | null;
+  profile: MeOut | null;
+  /** Cüzdan sunucuda kayıtlı mı (rol + kullanıcı adı verilmiş mi). */
+  registered: boolean;
+  /** JWT'nin bitiş anı (ms epoch). */
   expiresAt: number | null;
-  /** Mobilde WalletConnect eşleşme URI'si — UI QR/deep link gösterir. */
+  /** WalletConnect eşleşme URI'si — UI QR/deep link gösterir. */
   pairingUri: string | null;
-  /** Hangi imza yolu kullanılıyor: uygulama içi cüzdan, WalletConnect ya da SEP-7. */
-  walletMode: WalletMode | null;
+  walletMode: NativeWalletMode | null;
   onboardingSeen: boolean;
   error: string | null;
 
@@ -39,22 +39,16 @@ interface SessionState {
   markOnboardingSeen: () => Promise<void>;
   connectWallet: (options?: { mode?: NativeWalletMode; walletId?: string }) => Promise<string>;
   cancelPairing: () => void;
-  /** Uygulama içi cüzdan: var olanı yükler, yoksa üretir. */
-  useLocalWallet: () => Promise<string>;
-  /** Var olan gizli anahtarı içe aktarır (S…). */
-  importLocalWallet: (secret: string) => Promise<string>;
-  /** SEP-7: challenge'ı harici cüzdanda imzalatır, sonucu bekler. */
-  signInWithSep7: (address: string, isCancelled?: () => boolean) => Promise<void>;
   signIn: () => Promise<void>;
-  /** Kayıt: rol + form → backend; başarılıysa profile/rol set edilir. */
-  register: (payload: RegisterPayload) => Promise<void>;
+  register: (payload: RegisterIn) => Promise<void>;
+  refreshProfile: () => Promise<void>;
   signOut: () => Promise<void>;
   clearError: () => void;
 }
 
 interface PersistedSession {
   address: string;
-  role: Role | null;
+  role: UserRole | null;
   expiresAt: number | null;
 }
 
@@ -74,6 +68,7 @@ export const useSession = create<SessionState>((set, get) => ({
   address: null,
   role: null,
   profile: null,
+  registered: false,
   expiresAt: null,
   pairingUri: null,
   walletMode: null,
@@ -95,7 +90,6 @@ export const useSession = create<SessionState>((set, get) => ({
       return;
     }
 
-    // Token'ın süresi dolmuşsa hiç denemeden girişe düş (401 turu atmadan).
     if (isExpired(persisted.expiresAt)) {
       await clearStoredSession();
       set({
@@ -115,10 +109,9 @@ export const useSession = create<SessionState>((set, get) => ({
       onboardingSeen,
     });
 
-    // Profil taze mi? Sessizce yenile; 401 gelirse api istemcisi köprüyü tetikler.
-    profileApi
-      .me()
-      .then((profile) => set({ profile, role: profile.role }))
+    // Profil ve kayıt durumu tazelensin; 401 gelirse köprü devreye girer.
+    get()
+      .refreshProfile()
       .catch(() => undefined);
   },
 
@@ -148,34 +141,6 @@ export const useSession = create<SessionState>((set, get) => ({
     }
   },
 
-  async useLocalWallet() {
-    const address = (await localWallet.address()) ?? (await localWallet.create());
-    set({ address, status: 'wallet_connected', walletMode: 'local', error: null });
-    return address;
-  },
-
-  async importLocalWallet(secret) {
-    const address = await localWallet.importSecret(secret);
-    set({ address, status: 'wallet_connected', walletMode: 'local', error: null });
-    return address;
-  },
-
-  async signInWithSep7(address, isCancelled) {
-    set({ error: null, address, walletMode: 'sep7' });
-    try {
-      const { requestId } = await startSep7SignIn(address);
-      const { token, expiresAt } = await waitForSep7(requestId, { isCancelled });
-      await secureStorage.set(STORAGE_KEYS.jwt, token);
-      const profile = await profileApi.me().catch(() => null);
-      const role = profile?.role ?? null;
-      await persist({ address, role, expiresAt });
-      set({ status: 'signed_in', profile, role, expiresAt });
-    } catch (err) {
-      set({ error: userMessage(err) });
-      throw err;
-    }
-  },
-
   cancelPairing() {
     set({ pairingUri: null });
     void wallet.abortPairing?.();
@@ -185,12 +150,18 @@ export const useSession = create<SessionState>((set, get) => ({
     const address = get().address ?? (await get().connectWallet());
     set({ error: null });
     try {
-      const { token, expiresAt } = await loginWithSep10(address);
-      await secureStorage.set(STORAGE_KEYS.jwt, token);
-      const profile = await profileApi.me().catch(() => null); // kayıtsız cüzdan → null
-      const role = profile?.role ?? null;
-      await persist({ address, role, expiresAt });
-      set({ status: 'signed_in', profile, role, address, expiresAt });
+      const session = await loginWithSep10(address);
+      await secureStorage.set(STORAGE_KEYS.jwt, session.token);
+      const role = session.user?.role ?? null;
+      await persist({ address, role, expiresAt: session.expiresAt });
+      set({
+        status: 'signed_in',
+        address,
+        role,
+        profile: session.user,
+        registered: session.registered,
+        expiresAt: session.expiresAt,
+      });
     } catch (err) {
       set({ error: userMessage(err) });
       throw err;
@@ -198,10 +169,20 @@ export const useSession = create<SessionState>((set, get) => ({
   },
 
   async register(payload) {
-    const profile = await profileApi.register(payload);
-    const address = get().address ?? profile.address;
+    const profile = await usersApi.register(payload);
+    const address = get().address ?? profile.stellar_address;
     await persist({ address, role: profile.role, expiresAt: get().expiresAt });
-    set({ profile, role: profile.role, address, status: 'signed_in' });
+    set({ profile, role: profile.role, registered: true, address, status: 'signed_in' });
+  },
+
+  async refreshProfile() {
+    const me = await authApi.me();
+    set({
+      profile: me.user,
+      role: me.user?.role ?? null,
+      registered: me.registered,
+      address: me.public_key,
+    });
   },
 
   async signOut() {
@@ -212,6 +193,7 @@ export const useSession = create<SessionState>((set, get) => ({
       address: null,
       role: null,
       profile: null,
+      registered: false,
       expiresAt: null,
       pairingUri: null,
       error: null,
@@ -224,8 +206,8 @@ export const useSession = create<SessionState>((set, get) => ({
 }));
 
 /**
- * 401 köprüsü: api istemcisi yetkisiz yanıt aldığında bir kez SEP-10 yenilemesi
- * dener (cüzdanda imza isteği açılır), başarısızsa oturumu kapatır.
+ * 401 köprüsü: önce `POST /auth/refresh` denenir (cüzdan imzası gerekmez).
+ * O da başarısızsa oturum kapatılır ve kullanıcı girişe yönlendirilir.
  * Eşzamanlı 401'ler tek yenileme isteğinde birleşir.
  */
 let refreshInFlight: Promise<string | null> | null = null;
@@ -234,16 +216,29 @@ registerAuthBridge({
   async refresh() {
     if (refreshInFlight) return refreshInFlight;
     refreshInFlight = (async () => {
-      const state = useSession.getState();
-      const address = state.address ?? (await wallet.getAddress().catch(() => null));
-      if (!address) return null;
       try {
-        const { token, expiresAt } = await loginWithSep10(address);
-        await secureStorage.set(STORAGE_KEYS.jwt, token);
-        await persist({ address, role: state.role, expiresAt });
-        useSession.setState({ address, expiresAt, status: 'signed_in', error: null });
-        return token;
-      } catch {
+        const login = await authApi.refresh();
+        const expiresAtMs = login.expires_at ? Date.parse(login.expires_at) : NaN;
+        const expiresAt = Number.isFinite(expiresAtMs) ? expiresAtMs : null;
+        await secureStorage.set(STORAGE_KEYS.jwt, login.token);
+        await persist({
+          address: login.public_key,
+          role: login.user?.role ?? null,
+          expiresAt,
+        });
+        useSession.setState({
+          address: login.public_key,
+          role: login.user?.role ?? null,
+          profile: login.user,
+          registered: login.registered,
+          expiresAt,
+          status: 'signed_in',
+          error: null,
+        });
+        debugLog('auth', 'JWT yenilendi');
+        return login.token;
+      } catch (err) {
+        debugError('auth', 'JWT yenilenemedi', err);
         return null;
       }
     })();
@@ -260,6 +255,7 @@ registerAuthBridge({
       status: 'signed_out',
       role: null,
       profile: null,
+      registered: false,
       expiresAt: null,
       error: 'Your session expired. Sign in again with your wallet.',
     });

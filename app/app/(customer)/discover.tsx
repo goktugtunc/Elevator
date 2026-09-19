@@ -3,72 +3,81 @@ import { Check, Heart, RotateCcw, X } from 'lucide-react-native';
 import { useCallback, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
-import { ServiceListingCard, SwipeDeck, type SwipeDeckHandle } from '@/components/discover';
+import { ListingCard, SwipeDeck, type SwipeDeckHandle } from '@/components/discover';
 import { Screen, ScreenHeader } from '@/components/layout';
 import { Button, Card, Text } from '@/components/ui';
-import { followApi, listingsApi } from '@/lib/api';
+import { discoverApi, tradersApi } from '@/lib/api';
+import type { DiscoverCardOut, InteractionAction } from '@/lib/api/types';
 import { userMessage } from '@/lib/errors';
 import { colors, layout, radius, shadow, spacing } from '@/theme';
-import type { Listing } from '@/types';
 
 /**
- * Figma 2a/2c · Keşfet · Müşteri (node 21:30, 21:282) — FE-05.
- * Sağa kaydır = Teklif İste · Sola kaydır = Geç · Kalp = Takip Et.
- * Veri: `GET /listings?kind=service` (BE-03). Sahte veri yok; yükleniyor/boş/hata
- * durumları ekranda gösterilir.
+ * Keşfet · Müşteri — `GET /api/v1/discover` (sunucu role göre hizmet ilanlarını döner).
+ * Sağa kaydır = offer_request · Sola kaydır = pass · Kalp = follow.
+ * Etkileşimler `POST /discover/{target_type}/{target_id}/action` ile kaydedilir.
  */
-export default function CustomerKesfet() {
+export default function CustomerDiscover() {
   const deckRef = useRef<SwipeDeckHandle>(null);
-  const [top, setTop] = useState<Listing | null>(null);
+  const [top, setTop] = useState<DiscoverCardOut | null>(null);
   const [notice, setNotice] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
   const [deckKey, setDeckKey] = useState(0);
 
-  const listings = useQuery({
-    queryKey: ['listings', 'discover', 'service'],
-    queryFn: () => listingsApi.discover({ kind: 'service' }),
+  const feed = useQuery({
+    queryKey: ['discover', 'customer'],
+    queryFn: () => discoverApi.feed({ limit: 20 }),
   });
 
-  const requestOffer = useMutation({
-    mutationFn: (listing: Listing) => listingsApi.requestOffer(listing.id),
-    onSuccess: () => setNotice({ tone: 'ok', text: 'Your offer request was sent to the trader.' }),
+  const act = useMutation({
+    mutationFn: ({ card, action }: { card: DiscoverCardOut; action: InteractionAction }) =>
+      discoverApi.action(card.target_type, card.target_id, action),
     onError: (err) => setNotice({ tone: 'error', text: userMessage(err) }),
   });
 
   const follow = useMutation({
-    mutationFn: (listing: Listing) => followApi.follow(listing.ownerAddress),
+    mutationFn: (card: DiscoverCardOut) => tradersApi.follow(card.listing.owner_id),
     onSuccess: () => setNotice({ tone: 'ok', text: 'Trader added to your following list.' }),
     onError: (err) => setNotice({ tone: 'error', text: userMessage(err) }),
   });
 
   const onSwipe = useCallback(
-    (listing: Listing, direction: 'left' | 'right') => {
+    (card: DiscoverCardOut, direction: 'left' | 'right') => {
       setNotice(null);
-      if (direction === 'right') requestOffer.mutate(listing);
+      const action: InteractionAction = direction === 'right' ? 'offer_request' : 'pass';
+      act.mutate(
+        { card, action },
+        {
+          onSuccess: () => {
+            if (action === 'offer_request') {
+              setNotice({ tone: 'ok', text: 'Your interest was sent to the trader.' });
+            }
+          },
+        },
+      );
     },
-    [requestOffer],
+    [act],
   );
 
-  const items = listings.data?.items ?? [];
+  const items = feed.data?.items ?? [];
 
   return (
     <Screen riskStrip={false} padded={false} scroll={false}>
       <ScreenHeader title="Discover" subtitle="Swipe through traders that fit you" />
 
       <View style={styles.body}>
-        {listings.isPending ? (
+        {feed.isPending ? (
           <View style={styles.center}>
             <ActivityIndicator color={colors.navy900} />
             <Text variant="caption" color="text2">
               Loading listings…
             </Text>
           </View>
-        ) : listings.isError ? (
+        ) : feed.isError ? (
           <Card style={styles.state}>
             <Text variant="h2">Could not load listings</Text>
             <Text variant="body" color="text2">
-              {userMessage(listings.error)}
+              {userMessage(feed.error)}
             </Text>
-            <Button title="Try again" onPress={() => listings.refetch()} />
+            <Button title="Try again" onPress={() => feed.refetch()} />
           </Card>
         ) : items.length === 0 ? (
           <Card style={styles.state}>
@@ -77,18 +86,18 @@ export default function CustomerKesfet() {
               Service listings from traders show up here. Publish a capital listing and traders can
               make you an offer too.
             </Text>
-            <Button title="Refresh" variant="secondary" onPress={() => listings.refetch()} />
+            <Button title="Refresh" variant="secondary" onPress={() => feed.refetch()} />
           </Card>
         ) : (
-          <SwipeDeck<Listing>
+          <SwipeDeck<DiscoverCardOut>
             key={deckKey}
             ref={deckRef}
             data={items}
-            keyExtractor={(l) => l.id}
-            renderCard={(l) => <ServiceListingCard listing={l} />}
+            keyExtractor={(c) => `${c.target_type}:${c.target_id}`}
+            renderCard={(c) => <ListingCard card={c} />}
             onSwipe={onSwipe}
             onTopChange={setTop}
-            rightLabel="REQUEST"
+            rightLabel="INTERESTED"
             renderEmpty={() => (
               <Card style={styles.state}>
                 <Text variant="h2">That’s everyone for now</Text>
@@ -101,7 +110,7 @@ export default function CustomerKesfet() {
                   leftIcon={<RotateCcw size={16} color={colors.navy900} />}
                   onPress={() => {
                     setDeckKey((k) => k + 1);
-                    listings.refetch();
+                    feed.refetch();
                   }}
                 />
               </Card>
@@ -136,9 +145,9 @@ export default function CustomerKesfet() {
               <Heart size={20} color={colors.navy900} />
             </ActionButton>
             <ActionButton
-              label="Request offer"
+              label="Interested"
               onPress={() => deckRef.current?.swipe('right')}
-              disabled={!top || requestOffer.isPending}
+              disabled={!top || act.isPending}
               tint={colors.profit}
             >
               <Check size={22} color={colors.profit} />

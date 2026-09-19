@@ -3,78 +3,86 @@ import { Bookmark, Check, RotateCcw, X } from 'lucide-react-native';
 import { useCallback, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
-import {
-  CapitalListingCard,
-  OfferSheet,
-  SwipeDeck,
-  type OfferDraft,
-  type SwipeDeckHandle,
-} from '@/components/discover';
+import { ListingCard, OfferSheet, SwipeDeck, type SwipeDeckHandle } from '@/components/discover';
 import { Screen, ScreenHeader } from '@/components/layout';
 import { Button, Card, Text } from '@/components/ui';
-import { listingsApi } from '@/lib/api';
+import { discoverApi, offersApi } from '@/lib/api';
+import type { DiscoverCardOut, InteractionAction, OfferCreateIn } from '@/lib/api/types';
 import { userMessage } from '@/lib/errors';
 import { colors, layout, radius, shadow, spacing } from '@/theme';
-import type { Listing } from '@/types';
 
 /**
- * Figma 2b/2d · Keşfet · Trader (node 21:160, 21:414) — FE-06.
- * Sağa kaydır = Teklif Ver (bottom sheet açılır) · Sola kaydır = Geç · Yer imi = Kaydet.
- * Veri: `GET /listings?kind=capital` (BE-03). Sahte veri yok.
+ * Keşfet · Trader — `GET /api/v1/discover` (sunucu role göre sermaye ilanlarını döner).
+ * Sağa kaydır = teklif sheet'i · Sola kaydır = pass · Yer imi = save.
+ * Teklif `POST /api/v1/offers` ile gönderilir.
  */
-export default function TraderKesfet() {
+export default function TraderDiscover() {
   const deckRef = useRef<SwipeDeckHandle>(null);
-  const [top, setTop] = useState<Listing | null>(null);
-  const [offerTarget, setOfferTarget] = useState<Listing | null>(null);
+  const [top, setTop] = useState<DiscoverCardOut | null>(null);
   const [notice, setNotice] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
   const [deckKey, setDeckKey] = useState(0);
+  const [offerTarget, setOfferTarget] = useState<DiscoverCardOut | null>(null);
 
-  const listings = useQuery({
-    queryKey: ['listings', 'discover', 'capital'],
-    queryFn: () => listingsApi.discover({ kind: 'capital' }),
+  const feed = useQuery({
+    queryKey: ['discover', 'trader'],
+    queryFn: () => discoverApi.feed({ limit: 20 }),
+  });
+
+  const act = useMutation({
+    mutationFn: ({ card, action }: { card: DiscoverCardOut; action: InteractionAction }) =>
+      discoverApi.action(card.target_type, card.target_id, action),
+    onError: (err) => setNotice({ tone: 'error', text: userMessage(err) }),
+  });
+
+  const save = useMutation({
+    mutationFn: (card: DiscoverCardOut) =>
+      discoverApi.action(card.target_type, card.target_id, 'save'),
+    onSuccess: () => setNotice({ tone: 'ok', text: 'Listing saved.' }),
+    onError: (err) => setNotice({ tone: 'error', text: userMessage(err) }),
   });
 
   const createOffer = useMutation({
-    mutationFn: ({ listing, draft }: { listing: Listing; draft: OfferDraft }) =>
-      listingsApi.createOffer(listing.id, draft),
+    mutationFn: (draft: OfferCreateIn) => offersApi.create(draft),
     onSuccess: () => {
       setOfferTarget(null);
       setNotice({ tone: 'ok', text: 'Your offer was sent to the customer.' });
     },
   });
 
-  const save = useMutation({
-    mutationFn: (listing: Listing) => listingsApi.save(listing.id),
-    onSuccess: () => setNotice({ tone: 'ok', text: 'Listing saved.' }),
-    onError: (err) => setNotice({ tone: 'error', text: userMessage(err) }),
-  });
+  const onSwipe = useCallback(
+    (card: DiscoverCardOut, direction: 'left' | 'right') => {
+      setNotice(null);
+      if (direction === 'right') {
+        setOfferTarget(card);
+        return;
+      }
+      const action: InteractionAction = 'pass';
+      act.mutate({ card, action });
+    },
+    [act],
+  );
 
-  const onSwipe = useCallback((listing: Listing, direction: 'left' | 'right') => {
-    setNotice(null);
-    if (direction === 'right') setOfferTarget(listing);
-  }, []);
-
-  const items = listings.data?.items ?? [];
+  const items = feed.data?.items ?? [];
 
   return (
     <Screen riskStrip={false} padded={false} scroll={false}>
       <ScreenHeader title="Discover" subtitle="Browse capital listings and make offers" />
 
       <View style={styles.body}>
-        {listings.isPending ? (
+        {feed.isPending ? (
           <View style={styles.center}>
             <ActivityIndicator color={colors.navy900} />
             <Text variant="caption" color="text2">
               Loading listings…
             </Text>
           </View>
-        ) : listings.isError ? (
+        ) : feed.isError ? (
           <Card style={styles.state}>
             <Text variant="h2">Could not load listings</Text>
             <Text variant="body" color="text2">
-              {userMessage(listings.error)}
+              {userMessage(feed.error)}
             </Text>
-            <Button title="Try again" onPress={() => listings.refetch()} />
+            <Button title="Try again" onPress={() => feed.refetch()} />
           </Card>
         ) : items.length === 0 ? (
           <Card style={styles.state}>
@@ -83,15 +91,15 @@ export default function TraderKesfet() {
               Capital listings from customers show up here. Publish a service listing and customers
               can reach out to you too.
             </Text>
-            <Button title="Refresh" variant="secondary" onPress={() => listings.refetch()} />
+            <Button title="Refresh" variant="secondary" onPress={() => feed.refetch()} />
           </Card>
         ) : (
-          <SwipeDeck<Listing>
+          <SwipeDeck<DiscoverCardOut>
             key={deckKey}
             ref={deckRef}
             data={items}
-            keyExtractor={(l) => l.id}
-            renderCard={(l) => <CapitalListingCard listing={l} />}
+            keyExtractor={(c) => `${c.target_type}:${c.target_id}`}
+            renderCard={(c) => <ListingCard card={c} />}
             onSwipe={onSwipe}
             onTopChange={setTop}
             rightLabel="OFFER"
@@ -107,7 +115,7 @@ export default function TraderKesfet() {
                   leftIcon={<RotateCcw size={16} color={colors.navy900} />}
                   onPress={() => {
                     setDeckKey((k) => k + 1);
-                    listings.refetch();
+                    feed.refetch();
                   }}
                 />
               </Card>
@@ -154,8 +162,8 @@ export default function TraderKesfet() {
       </View>
 
       <OfferSheet
-        key={offerTarget?.id ?? 'offer-sheet'}
-        listing={offerTarget}
+        key={offerTarget?.listing.id ?? 'offer-sheet'}
+        listing={offerTarget?.listing ?? null}
         visible={offerTarget !== null}
         onClose={() => {
           setOfferTarget(null);
@@ -163,7 +171,7 @@ export default function TraderKesfet() {
         }}
         submitting={createOffer.isPending}
         error={createOffer.isError ? userMessage(createOffer.error) : null}
-        onSubmit={(draft) => offerTarget && createOffer.mutate({ listing: offerTarget, draft })}
+        onSubmit={(draft) => createOffer.mutate(draft)}
       />
     </Screen>
   );

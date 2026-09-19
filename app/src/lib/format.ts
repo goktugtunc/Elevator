@@ -61,3 +61,33 @@ export function parseNumberInput(input: string): number | null {
   const n = Number(cleaned);
   return Number.isFinite(n) ? n : null;
 }
+
+/** Sunucu oranları basis point tutar: 2000 → "20%". */
+export function formatBps(bps: number | null | undefined, digits = 0): string {
+  if (bps === null || bps === undefined) return '—';
+  return `${(bps / 100).toFixed(digits)}%`;
+}
+
+/** İşaretli bps (K/Z): 860 → "+8.6%". */
+export function formatBpsSigned(bps: number | null | undefined, digits = 1): string {
+  if (bps === null || bps === undefined) return '—';
+  return formatPnlPct(bps / 100, digits);
+}
+
+/** Sunucu tutarları string gelir (ondalık kayıp olmasın diye). */
+export function formatAmount(value: string | null | undefined, code = ''): string {
+  if (!value) return '—';
+  const n = Number(value);
+  if (!Number.isFinite(n)) return value;
+  return code ? `${trNumber0.format(n)} ${code}` : trNumber0.format(n);
+}
+
+/** "30" gün → "1 mo" gibi kısa süre etiketi. */
+export function formatDuration(days: number | null | undefined): string {
+  if (!days) return '—';
+  if (days % 30 === 0) {
+    const months = days / 30;
+    return months === 1 ? '1 month' : `${months} months`;
+  }
+  return days === 1 ? '1 day' : `${days} days`;
+}

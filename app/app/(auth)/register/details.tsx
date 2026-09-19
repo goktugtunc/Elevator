@@ -4,19 +4,36 @@ import { StyleSheet, View } from 'react-native';
 
 import { Screen, TopBar } from '@/components/layout';
 import { Button, Card, Chip, Field, Pill, Progress, Text } from '@/components/ui';
-import { type RegisterPayload } from '@/lib/api';
+import type { MarketCategory, RegisterIn, RiskLevel, RiskProfile } from '@/lib/api/types';
 import { userMessage } from '@/lib/errors';
 import { parseNumberInput } from '@/lib/format';
 import { shortAddress } from '@/lib/stellar';
 import { useSession } from '@/store/session';
-import { MARKETS, RISK_LABEL, RISK_LEVELS, type Market, type RiskLevel } from '@/types';
 import { colors, radius, spacing } from '@/theme';
 
 /**
- * Figma 1f · Kayıt · Bilgiler (Müşteri) — node 19:269
- * Figma 1g · Kayıt · Bilgiler (Trader)  — node 19:353
- * Adım 2/2 (FE-03). Gönderim: `session.register()` → `POST /register` (BE-01).
+ * Figma 1f/1g · Kayıt · Bilgiler — `POST /api/v1/users/register` (RegisterIn).
+ * Sunucu piyasaları üç kategoriye indirger (crypto | stable_fx | defi, en fazla 3),
+ * oranları bps ister ve tutarları string alır.
  */
+const MARKETS: { value: MarketCategory; label: string }[] = [
+  { value: 'crypto', label: 'Crypto' },
+  { value: 'stable_fx', label: 'Stable / FX' },
+  { value: 'defi', label: 'DeFi' },
+];
+
+const RISK_PROFILES: { value: RiskProfile; label: string }[] = [
+  { value: 'conservative', label: 'Conservative' },
+  { value: 'balanced', label: 'Balanced' },
+  { value: 'aggressive', label: 'Aggressive' },
+];
+
+const RISK_LEVELS: { value: RiskLevel; label: string }[] = [
+  { value: 'low', label: 'Low' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'high', label: 'High' },
+];
+
 type Errors = Partial<Record<string, string>>;
 
 export default function RegisterDetails() {
@@ -30,9 +47,11 @@ export default function RegisterDetails() {
   const register = useSession((s) => s.register);
 
   const [username, setUsername] = useState('');
+  const [displayName, setDisplayName] = useState('');
   const [budget, setBudget] = useState('');
-  const [risk, setRisk] = useState<RiskLevel | null>(null);
-  const [markets, setMarkets] = useState<Market[]>([]);
+  const [riskProfile, setRiskProfile] = useState<RiskProfile | null>(null);
+  const [riskLevel, setRiskLevel] = useState<RiskLevel | null>(null);
+  const [markets, setMarkets] = useState<MarketCategory[]>([]);
   const [strategy, setStrategy] = useState('');
   const [commission, setCommission] = useState('');
   const [minCapital, setMinCapital] = useState('');
@@ -41,36 +60,42 @@ export default function RegisterDetails() {
   const [formError, setFormError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  // Rol parametresi yoksa (derin link, yenileme) 1. adıma dön.
   if (role !== 'customer' && role !== 'trader') {
     return <Redirect href="/(auth)/register/role" />;
   }
 
-  const toggleMarket = (m: Market) =>
-    setMarkets((prev) => (prev.includes(m) ? prev.filter((x) => x !== m) : [...prev, m]));
+  const toggleMarket = (m: MarketCategory) =>
+    setMarkets((prev) =>
+      prev.includes(m) ? prev.filter((x) => x !== m) : prev.length >= 3 ? prev : [...prev, m],
+    );
 
-  const buildPayload = (): { payload?: RegisterPayload; errors: Errors } => {
+  const buildPayload = (): { payload?: RegisterIn; errors: Errors } => {
     const next: Errors = {};
     const name = username.trim();
     if (name.length < 3) next.username = 'Use at least 3 characters.';
     else if (name.length > 24) next.username = 'Use at most 24 characters.';
     else if (!/^[a-zA-Z0-9._]+$/.test(name))
       next.username = 'Letters, numbers, dots and underscores only.';
+
+    const display = displayName.trim() || name;
     if (markets.length === 0) next.markets = 'Pick at least one market.';
 
     if (!isTrader) {
-      const budgetTRY = parseNumberInput(budget);
-      if (budgetTRY === null || budgetTRY <= 0) next.budget = 'Enter a valid amount.';
-      if (!risk) next.risk = 'Choose your risk preference.';
+      const budgetValue = parseNumberInput(budget);
+      if (budgetValue === null || budgetValue <= 0) next.budget = 'Enter a valid amount.';
+      if (!riskProfile) next.risk = 'Choose your risk preference.';
       if (Object.keys(next).length > 0) return { errors: next };
       return {
         errors: next,
         payload: {
           role: 'customer',
           username: name,
-          budgetTRY: budgetTRY as number,
-          riskPreference: risk as RiskLevel,
-          markets,
+          display_name: display,
+          customer: {
+            budget_amount: String(budgetValue),
+            risk_profile: riskProfile as RiskProfile,
+            markets,
+          },
         },
       };
     }
@@ -81,18 +106,23 @@ export default function RegisterDetails() {
     const commissionPct = parseNumberInput(commission);
     if (commissionPct === null || commissionPct <= 0 || commissionPct > 50)
       next.commission = 'Enter a rate between 0% and 50%.';
-    const minCapitalTRY = parseNumberInput(minCapital);
-    if (minCapitalTRY === null || minCapitalTRY <= 0) next.minCapital = 'Enter a valid amount.';
+    const minCapitalValue = parseNumberInput(minCapital);
+    if (minCapitalValue === null || minCapitalValue <= 0) next.minCapital = 'Enter a valid amount.';
+    if (!riskLevel) next.risk = 'Choose your risk level.';
     if (Object.keys(next).length > 0) return { errors: next };
     return {
       errors: next,
       payload: {
         role: 'trader',
         username: name,
-        markets,
-        strategySummary: summary,
-        commissionPct: commissionPct as number,
-        minCapitalTRY: minCapitalTRY as number,
+        display_name: display,
+        trader: {
+          markets,
+          strategy_summary: summary,
+          commission_bps: Math.round((commissionPct as number) * 100),
+          min_capital: String(minCapitalValue),
+          risk_level: riskLevel as RiskLevel,
+        },
       },
     };
   };
@@ -105,7 +135,7 @@ export default function RegisterDetails() {
     setBusy(true);
     setFormError(null);
     try {
-      // Kayıt korumalı uç nokta: JWT yoksa önce cüzdan + SEP-10 girişi yapılır.
+      // Kayıt korumalı uç: JWT yoksa önce cüzdan + SEP-10 girişi yapılır.
       if (status !== 'signed_in') await signIn();
       await register(payload);
       router.replace('/');
@@ -171,14 +201,37 @@ export default function RegisterDetails() {
           hint="Shown as @username on your profile."
         />
 
+        <Field
+          label="Display name"
+          value={displayName}
+          onChangeText={setDisplayName}
+          placeholder="Optional — defaults to your username"
+          maxLength={48}
+        />
+
+        <ChipGroup
+          label={isTrader ? 'Markets you specialise in' : 'Markets you care about'}
+          error={errors.markets}
+          hint="Pick up to three."
+          options={MARKETS.map((m) => ({
+            key: m.value,
+            label: m.label,
+            active: markets.includes(m.value),
+          }))}
+          onToggle={(key) => toggleMarket(key as MarketCategory)}
+        />
+
         {isTrader ? (
           <>
             <ChipGroup
-              label="Markets you specialise in"
-              error={errors.markets}
-              hint="Pick as many as you like."
-              options={MARKETS.map((m) => ({ key: m, label: m, active: markets.includes(m) }))}
-              onToggle={(key) => toggleMarket(key as Market)}
+              label="Risk level"
+              error={errors.risk}
+              options={RISK_LEVELS.map((r) => ({
+                key: r.value,
+                label: r.label,
+                active: riskLevel === r.value,
+              }))}
+              onToggle={(key) => setRiskLevel(key as RiskLevel)}
             />
             <Field
               label="Strategy summary"
@@ -198,15 +251,14 @@ export default function RegisterDetails() {
               keyboardType="decimal-pad"
               suffix="%"
               error={errors.commission}
-              hint="Your share of the profit — written into the contract."
+              hint="Your share of the profit — written into the agreement."
             />
             <Field
               label="Min. capital"
               value={minCapital}
               onChangeText={setMinCapital}
-              placeholder="50,000"
+              placeholder="1000"
               keyboardType="decimal-pad"
-              suffix="TRY"
               error={errors.minCapital}
               hint="Offers below this amount are hidden from you."
             />
@@ -217,28 +269,20 @@ export default function RegisterDetails() {
               label="Investment budget"
               value={budget}
               onChangeText={setBudget}
-              placeholder="250,000"
+              placeholder="1000"
               keyboardType="decimal-pad"
-              suffix="TRY"
               error={errors.budget}
               hint="Your capital stays in your wallet; this is only used for matching."
             />
             <ChipGroup
               label="Risk preference"
               error={errors.risk}
-              options={RISK_LEVELS.map((level) => ({
-                key: level,
-                label: RISK_LABEL[level],
-                active: risk === level,
+              options={RISK_PROFILES.map((r) => ({
+                key: r.value,
+                label: r.label,
+                active: riskProfile === r.value,
               }))}
-              onToggle={(key) => setRisk(key as RiskLevel)}
-            />
-            <ChipGroup
-              label="Markets you care about"
-              error={errors.markets}
-              hint="Pick as many as you like."
-              options={MARKETS.map((m) => ({ key: m, label: m, active: markets.includes(m) }))}
-              onToggle={(key) => toggleMarket(key as Market)}
+              onToggle={(key) => setRiskProfile(key as RiskProfile)}
             />
           </>
         )}
@@ -256,14 +300,13 @@ export default function RegisterDetails() {
 
         <Button title="Create account" fullWidth loading={busy} onPress={onSubmit} />
         <Text variant="caption" color="text3" align="center">
-          Finishing sign-up links your role to this wallet address and asks for a SEP-10 signature.
+          Finishing sign-up links your role to this wallet address.
         </Text>
       </View>
     </Screen>
   );
 }
 
-/** Etiketli chip grubu — tek seçim (Risk Tercihi) ve çok seçim (Piyasalar) için. */
 function ChipGroup({
   label,
   options,

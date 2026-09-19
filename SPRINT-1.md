@@ -6,28 +6,16 @@
 
 ## Backend
 
-**Canlı:** <https://mobilback.yolalapp.com> — _MobilApp Trader Pools API 1.0.0_
+**Canlı ve tamamlandı:** <https://mobilback.yolalapp.com> — _TraderKirala API 1.0.0_, **92 uç**.
+Şema: `/docs` · `/openapi.json`. Backend ayrı bir depoda geliştiriliyor; bu repoda `backend/` klasörü yok.
 
-| Uç nokta | Durum | Not |
-|---|---|---|
-| `GET /health` | ✅ | `{"status":"ok","db":"ok","version":"0.1.0"}` |
-| `GET /health/stellar` | ✅ | Testnet, Horizon erişimi, güncel ledger |
-| `GET /api/v1/config` | ✅ | network, passphrase, horizon/RPC URL, `home_domain`, `api_prefix` |
-| `GET /docs` · `GET /openapi.json` | ✅ | Şema buradan izlenir |
-| Diğer tüm uçlar (`/auth/*`, `/register`, `/listings*`, …) | ⬜ | `404 {"code":"http_error","message":"Not Found"}` |
-
-- **Önek `/api/v1`** — `EXPO_PUBLIC_API_BASE_URL` origin alır (`https://mobilback.yolalapp.com`), öneki `lib/api/endpoints.ts` ekler. `/health` önek dışındadır.
-- **SEP-10 home domain:** `mobilback.yolalapp.com` (config'ten okunur).
-- Sunucu `testnet`, passphrase `Test SDF Network ; September 2015` — Giriş ekranı bunu istemci ayarıyla karşılaştırıp uyuşmazlığı gösterir.
-- Hata gövdesi `{code, message, details}` → `ApiError.code` alanına taşınır.
-
-## Dil ve rotalar
-
-- **Uygulama arayüzü İngilizce** (19 Eyl kararı). Ekran metinleri, hata mesajları, etiketler (`RISK_LABEL`, `STATUS_LABEL`, `MARKETS`) ve sayı/tarih biçimi (`en-US`) İngilizce; para birimi `TRY` olarak kalır.
-- **Belgeler ve kod yorumları Türkçe** kalır (bu dosya, `README.md`, `docs/`).
-- **Rotalar İngilizceye taşındı** (web URL'leri de arayüzün parçası):
-  `panel→dashboard`, `hareketler→activity`, `islemler→trades`, `kesfet→discover`, `ilanlarim→listings`, `profil→profile`, `mesajlar→messages`, `sozlesme→contract`, `ilan→listing` (`olustur→create`), `bildirimler→notifications`, `cuzdan→wallet`.
-- Sayı girişi artık İngilizce yazım: virgül binlik, nokta ondalık (`parseNumberInput`).
+- **Base URL:** `https://mobilback.yolalapp.com/api/v1` (`.env` origin alır, öneki kod ekler). `/health` önek dışında.
+- **Giriş:** `GET /auth/sep10?account=` → imza → `POST /auth/sep10` → `{token, expires_at, public_key, registered, user}`.
+  Süre dolunca `POST /auth/refresh` (cüzdanda yeni imza gerekmez). Mesaj imzalayan cüzdanlar için `POST /auth/nonce` + `/auth/verify` de var.
+- **Sözleşme kuralları:** tutarlar string, oranlar bps (2000 = %20), piyasalar `crypto | stable_fx | defi`,
+  risk iki ölçekli (`risk_profile` ilanlarda, `risk_level` trader profilinde).
+- **Zincir üstü:** backend XDR üretir (`POST /agreements/{id}/tx/{action}`) → cüzdan imzalar → `POST /tx/submit`.
+- Ayrıntı ve ekran → uç eşlemesi: [docs/api-entegrasyon.md](docs/api-entegrasyon.md).
 
 ## Kurulum durumu (hazır)
 
@@ -59,10 +47,10 @@
 |---|---|---|---|---|---|---|
 | FE-01 | ~~Proje kurulumu, tema, UI kit, navigasyon iskeleti~~ | DS 0:1 | L | — | Claude | ✅ |
 | FE-02 | ~~Onboarding + Giriş (cüzdan) + Rol Seçimi~~ | 19:13 · 19:109 · 19:181 | M | — | Claude | ✅ |
-| FE-03 | Kayıt · Bilgiler formu (Müşteri / Trader varyantı), `session.register()` bağlantısı | 19:269 · 19:353 | M | BE-01 | Claude | 🟡 |
-| FE-04 | SEP-10: challenge doğrulama, JWT süresi/401 yenileme, hata mesajları (yanlış ağ, reddedilen imza) | 19:109 | S | BE-02 | Claude | 🟡 |
-| FE-05 | Keşfet · Müşteri kaydırmalı deck: kart, sağa = Teklif İste, sola = Geç, Takip Et | 21:30 · 21:282 | L | BE-03 | Claude | 🟡 |
-| FE-06 | Keşfet · Trader varyantı + "Teklif Ver" bottom sheet (Komisyon, getiri aralığı, not) | 21:160 · 21:414 | M | BE-03 | Claude | 🟡 |
+| FE-03 | Kayıt · Bilgiler formu (Müşteri / Trader varyantı) → `POST /users/register` | 19:269 · 19:353 | M | — | Claude | 🟡 |
+| FE-04 | SEP-10 girişi (`/auth/sep10`), `/auth/refresh` ile 401 yenileme, hata mesajları | 19:109 | S | — | Claude | 🟡 |
+| FE-05 | Keşfet · Müşteri deck → `GET /discover` + `POST /discover/.../action` | 21:30 · 21:282 | L | — | Claude | 🟡 |
+| FE-06 | Keşfet · Trader + "Teklif Ver" sheet → `POST /offers` | 21:160 · 21:414 | M | — | Claude | 🟡 |
 | FE-07 | ~~Bottom Sheet + Switch + Progress ortak bileşenleri~~ | 23:181 · 30:536 | S | — | Claude | ✅ |
 | FE-08 | Mesajlar listesi + Sohbet ekranı | 28:171 · 28:266 | M | BE-04 | | ⬜ |
 | FE-09 | Sözleşme ekranı + "Onaylamak için kaydır" → escrow kontrat çağrısı (bindings, simulate, imza, `POST /tx/submit`), işlem durumu UI'ı | 28:320 | L | BE-05, BE-06 | | ⬜ |
@@ -109,21 +97,23 @@ Backend beklemeden ilerletilebilecek işler: **FE-12 / FE-14** (FE-07 bileşenle
 - Keşfet aksiyonları için önerilen uçlar: `POST /listings/:id/requests` (müşteri teklif ister), `POST /listings/:id/offers` (trader teklif verir), `POST /listings/:id/saves` (trader kaydeder). Backend farklı isimlendirirse `endpoints.ts` güncellenir.
 - `Listing.owner` özeti (ad, baş harf, rating, 12 ay getiri, drawdown, sparkline, etiketler) `/listings` yanıtında gömülü bekleniyor; gelmezse kartta yalnızca cüzdan adresi görünür.
 
-## Backend'den beklenenler (birleşme noktaları)
+## Backend durumu
 
-| ID | Ne | Nereye | Durum |
-|---|---|---|---|
-| BE-01 | `POST /api/v1/register` (rol + form alanları) | `profileApi.register` | ⬜ |
-| BE-02 | `POST /api/v1/auth/challenge` (+`id`), `/auth/verify`, `/auth/sep7-callback`, `/auth/sep7-status/{id}` — bkz. [backend-sozlesme.md](docs/backend-sozlesme.md) | `lib/auth/` | ⬜ |
-| BE-03 | `/listings*`, `/my/listings`, teklif/kaydet uçları, `Listing.owner` özeti | `listingsApi` | ⬜ |
-| BE-04 | `/messages*` | `messagesApi` | ⬜ |
-| BE-05 | Kontrat ID'leri + typed bindings paketi | `src/lib/stellar/bindings/`, `.env` | ⬜ |
-| BE-06 | `POST /tx/submit` (Relayer) | `txApi` | ⬜ |
-| BE-07 | `/contracts*`, `/follow*` | `contractsApi`, `followApi` | ⬜ |
-| BE-08 | `/transactions` (+ `POST` trader için) | `tradesApi` | ⬜ |
-| BE-09 | `/anchor/deposit|withdraw|status` (SEP-24 interactive URL) | `anchorApi` | ⬜ |
-| BE-10 | `/notifications` | `notificationsApi` | ⬜ |
-| — | `GET /api/v1/config`, `GET /health` | `metaApi` | ✅ |
+Tüm uçlar canlı (92). Frontend'in kullandığı gruplar:
+
+| Alan | Uçlar | Frontend'de bağlı mı |
+|---|---|---|
+| Kimlik | `/auth/sep10`, `/auth/refresh`, `/auth/me` | ✅ |
+| Kullanıcı | `/users/register`, `/users/me` | ✅ |
+| Keşfet | `/discover`, `/discover/.../action` | ✅ |
+| Teklifler | `/offers*` | ✅ (oluşturma) |
+| Trader | `/traders*` | ✅ (takip) |
+| Panel · Hareketler | `/dashboard`, `/activity` | ⬜ FE-10/11/12 |
+| İlanlar | `/listings*` | ⬜ FE-15/16 |
+| Sözleşme | `/agreements*`, `/tx/submit` | ⬜ FE-09 |
+| Mesajlar | `/conversations*` | ⬜ FE-08 |
+| Bildirim | `/notifications*` | ⬜ FE-19 |
+| Cüzdan · Anchor | `/wallet*`, `/anchor*` | ⬜ FE-18 |
 
 ## Riskler ve kararlar
 

@@ -10,7 +10,6 @@ Freelance trader'ları sermaye sahipleriyle buluşturan, sözleşme ve escrow'u 
 traderkirala/
 ├── app/          Expo + React Native (birincil hedef Expo Web) — bu sprintte geliştirilen tek paket
 ├── contracts/    Soroban kontratları (Rust) — placeholder
-├── backend/      SEP-10 auth, indeksleyici, anchor proxy, Relayer — placeholder
 ├── docs/         Tasarım sistemi notları, geliştirme notları
 └── SPRINT-1.md   Sprint planı ve görev listesi
 ```

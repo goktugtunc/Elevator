@@ -2,29 +2,25 @@ import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { BottomSheet, Button, Field, Text } from '@/components/ui';
-import { parseNumberInput } from '@/lib/format';
+import type { ListingOut, OfferCreateIn } from '@/lib/api/types';
+import { formatAmount, formatDuration, parseNumberInput } from '@/lib/format';
 import { colors, radius, spacing } from '@/theme';
-import type { Listing } from '@/types';
 
 /**
- * Figma 2d · "Teklif Ver" bottom sheet (node 21:414) — FE-06.
- * Trader, müşterinin sermaye ilanına komisyon oranı, tahmini getiri aralığı ve
- * not ile teklif verir. Gönderim `POST /listings/:id/offers` (BE-03).
+ * "Teklif Ver" bottom sheet — `POST /api/v1/offers` gövdesini toplar.
+ * Tutar ve süre ilandan ön-doldurulur; oranlar sunucuya **bps** olarak gider
+ * (kullanıcı yüzde girer, 20 → 2000).
+ *
  * Form durumu mount ile sıfırlanır: çağıran taraf `key={listing.id}` verir.
  */
-export interface OfferDraft {
-  commissionPct: number;
-  expectedReturnRange: [number, number];
-  note?: string;
-}
+export type OfferDraft = OfferCreateIn;
 
 export interface OfferSheetProps {
-  listing: Listing | null;
+  listing: ListingOut | null;
   visible: boolean;
   onClose: () => void;
   onSubmit: (draft: OfferDraft) => void;
   submitting?: boolean;
-  /** Sunucudan dönen hata (teklif gönderilemediğinde sheet açık kalır). */
   error?: string | null;
 }
 
@@ -36,6 +32,11 @@ export function OfferSheet({
   submitting,
   error,
 }: OfferSheetProps) {
+  const assetCode = listing?.base_asset?.code ?? '';
+  const [amount, setAmount] = useState(listing?.amount ?? '');
+  const [duration, setDuration] = useState(
+    listing?.duration_days ? String(listing.duration_days) : '',
+  );
   const [commission, setCommission] = useState('');
   const [returnMin, setReturnMin] = useState('');
   const [returnMax, setReturnMax] = useState('');
@@ -43,22 +44,35 @@ export function OfferSheet({
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const submit = () => {
+    if (!listing) return;
     const next: Record<string, string> = {};
+
+    const amountValue = parseNumberInput(amount);
+    if (amountValue === null || amountValue <= 0) next.amount = 'Enter a valid amount.';
+
+    const days = parseNumberInput(duration);
+    if (days === null || days < 1) next.duration = 'Enter the duration in days.';
+
     const commissionPct = parseNumberInput(commission);
     if (commissionPct === null || commissionPct <= 0 || commissionPct > 50)
       next.commission = 'Enter a rate between 0% and 50%.';
+
     const min = parseNumberInput(returnMin);
     const max = parseNumberInput(returnMax);
-    if (min === null) next.returnMin = 'Enter the lower bound.';
-    if (max === null) next.returnMax = 'Enter the upper bound.';
     if (min !== null && max !== null && min > max)
       next.returnMax = 'The upper bound cannot be below the lower bound.';
+
     setErrors(next);
     if (Object.keys(next).length > 0) return;
 
     onSubmit({
-      commissionPct: commissionPct as number,
-      expectedReturnRange: [min as number, max as number],
+      listing_id: listing.id,
+      amount: String(amountValue),
+      base_asset_id: listing.base_asset_id ?? undefined,
+      duration_days: Math.round(days as number),
+      commission_bps: Math.round((commissionPct as number) * 100),
+      expected_return_min_bps: min === null ? undefined : Math.round(min * 100),
+      expected_return_max_bps: max === null ? undefined : Math.round(max * 100),
       note: note.trim() || undefined,
     });
   };
@@ -71,6 +85,38 @@ export function OfferSheet({
       subtitle={listing?.title}
       footer={<Button title="Send offer" fullWidth loading={submitting} onPress={submit} />}
     >
+      {listing ? (
+        <Text variant="caption" color="text3">
+          Listing asks for {formatAmount(listing.amount, assetCode)} ·{' '}
+          {formatDuration(listing.duration_days)}
+        </Text>
+      ) : null}
+
+      <View style={styles.row}>
+        <View style={styles.rowItem}>
+          <Field
+            label="Amount"
+            value={amount}
+            onChangeText={setAmount}
+            placeholder="1000"
+            keyboardType="decimal-pad"
+            suffix={assetCode}
+            error={errors.amount}
+          />
+        </View>
+        <View style={styles.rowItem}>
+          <Field
+            label="Duration"
+            value={duration}
+            onChangeText={setDuration}
+            placeholder="30"
+            keyboardType="number-pad"
+            suffix="days"
+            error={errors.duration}
+          />
+        </View>
+      </View>
+
       <Field
         label="Commission rate"
         value={commission}
@@ -79,11 +125,11 @@ export function OfferSheet({
         keyboardType="decimal-pad"
         suffix="%"
         error={errors.commission}
-        hint="Your share of the profit — written into the contract."
+        hint="Your share of the profit — written into the agreement."
       />
 
-      <View style={styles.range}>
-        <View style={styles.rangeItem}>
+      <View style={styles.row}>
+        <View style={styles.rowItem}>
           <Field
             label="Expected return (low)"
             value={returnMin}
@@ -94,7 +140,7 @@ export function OfferSheet({
             error={errors.returnMin}
           />
         </View>
-        <View style={styles.rangeItem}>
+        <View style={styles.rowItem}>
           <Field
             label="Expected return (high)"
             value={returnMax}
@@ -126,7 +172,7 @@ export function OfferSheet({
       ) : null}
 
       <Text variant="caption" color="text3">
-        If the offer is accepted, the contract and escrow are created on-chain. This is not a
+        If the offer is accepted, the agreement and escrow are created on-chain. This is not a
         guaranteed return — market risk stays with the customer.
       </Text>
     </BottomSheet>
@@ -134,7 +180,7 @@ export function OfferSheet({
 }
 
 const styles = StyleSheet.create({
-  range: { flexDirection: 'row', gap: spacing.md },
-  rangeItem: { flex: 1 },
+  row: { flexDirection: 'row', gap: spacing.md },
+  rowItem: { flex: 1 },
   error: { padding: spacing.md, borderRadius: radius.md, backgroundColor: colors.redBg },
 });
