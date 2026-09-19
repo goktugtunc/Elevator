@@ -11,6 +11,7 @@
  *
  * Metro web hedefinde bu dosya yerine ./wallet.web.ts kullanılır.
  */
+import { debugLog } from '@/lib/log';
 import { localWallet } from './local';
 import { WalletError, type ConnectOptions, type WalletAdapter } from './types';
 import { walletConnectWallet } from './walletconnect';
@@ -49,6 +50,7 @@ export const wallet: WalletAdapter = {
 
   async connect(options?: ConnectOptions) {
     const requested = options?.mode ?? mode;
+    debugLog('wallet', 'connect çağrıldı', { istenen: requested, kayıtlı: mode });
 
     if (requested === 'walletconnect') {
       if (!walletConnectAvailable()) {
@@ -64,6 +66,7 @@ export const wallet: WalletAdapter = {
 
     const address = (await localWallet.address()) ?? (await localWallet.create());
     await setMode('local');
+    debugLog('wallet', 'UYGULAMA İÇİ cüzdan kullanıldı (WalletConnect değil)', { address });
     return { address, walletId: 'local' };
   },
 

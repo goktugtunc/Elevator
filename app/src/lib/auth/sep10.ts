@@ -1,6 +1,6 @@
 import { TransactionBuilder } from '@stellar/stellar-sdk';
 
-import { authApi } from '@/lib/api';
+import { ApiError, authApi } from '@/lib/api';
 import { debugError, debugLog } from '@/lib/log';
 import { stellarConfig } from '@/lib/stellar';
 import { wallet } from '@/lib/wallet';
@@ -19,7 +19,12 @@ import { jwtExpiresAt } from './jwt';
  * Cüzdanın yanlış ağda olması WalletError('WRONG_NETWORK') olarak yüzeye çıkar.
  */
 export type Sep10ErrorCode =
-  'WRONG_NETWORK' | 'INVALID_CHALLENGE' | 'EXPIRED_CHALLENGE' | 'ADDRESS_MISMATCH' | 'NO_TOKEN';
+  | 'BACKEND_MISSING'
+  | 'WRONG_NETWORK'
+  | 'INVALID_CHALLENGE'
+  | 'EXPIRED_CHALLENGE'
+  | 'ADDRESS_MISMATCH'
+  | 'NO_TOKEN';
 
 export class Sep10Error extends Error {
   constructor(
@@ -44,6 +49,12 @@ export async function loginWithSep10(address: string): Promise<Sep10Session> {
     challenge = await authApi.challenge(address);
   } catch (err) {
     debugError('auth:sep10', 'challenge alınamadı (backend hazır mı?)', err);
+    if (err instanceof ApiError && err.status === 404) {
+      throw new Sep10Error(
+        'Sign-in is not available yet: the server has no /auth/challenge endpoint (SEP-10). Connecting a wallet works; this step needs the backend.',
+        'BACKEND_MISSING',
+      );
+    }
     throw err;
   }
   const { transaction, networkPassphrase } = challenge;

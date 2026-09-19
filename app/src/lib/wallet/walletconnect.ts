@@ -114,7 +114,11 @@ export const walletConnectWallet: WalletAdapter = {
 
       // Zaten kurulu bir oturum varsa cüzdanı tekrar yormayalım.
       const existing = sessionAddress(provider);
-      if (existing) return { address: existing, walletId: 'walletconnect' };
+      if (existing) {
+        debugLog('wallet:wc', 'MEVCUT oturum kullanıldı, yeni eşleşme yok', { address: existing });
+        return { address: existing, walletId: 'walletconnect' };
+      }
+      debugLog('wallet:wc', 'kayıtlı oturum yok, yeni eşleşme gerekiyor');
 
       debugLog('wallet:wc', 'eşleşme başlatılıyor', { chain: CHAIN, methods: METHODS });
       const onUri = (uri: string) => {
