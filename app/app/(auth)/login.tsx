@@ -6,7 +6,7 @@ import { ActivityIndicator, Platform, StyleSheet, View } from 'react-native';
 
 import { Screen } from '@/components/layout';
 import { Button, Card, Pill, Text } from '@/components/ui';
-import { WalletChooserSheet, WalletConnectSheet } from '@/components/wallet';
+import { WalletConnectSheet } from '@/components/wallet';
 import { metaApi } from '@/lib/api';
 import { networkLabel, userMessage } from '@/lib/errors';
 import { stellarConfig } from '@/lib/stellar';
@@ -33,7 +33,6 @@ export default function Login() {
   const cancelPairing = useSession((s) => s.cancelPairing);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [chooserOpen, setChooserOpen] = useState(false);
 
   // Sunucu ayakta mı ve aynı ağda mı? (FE-04 — giriş denemeden önce görülür.)
   const backend = useQuery({
@@ -85,29 +84,33 @@ export default function Login() {
     }
   };
 
-  const onConnect = () => {
+  /**
+   * Web: Wallets Kit modalı (Freighter, xBull, Albedo…).
+   * Mobil: doğrudan WalletConnect eşleşmesi — QR ve cüzdan düğmeleri
+   * `WalletConnectSheet` içinde açılır.
+   */
+  const onConnect = async () => {
     setError(null);
     clearError();
-    // Web'de cüzdan seçimini Wallets Kit modalı yapar; mobilde kendi seçim ekranımız.
     if (Platform.OS === 'web') {
-      void finishSignIn();
+      await finishSignIn();
       return;
     }
-    setChooserOpen(true);
-  };
-
-  const onWalletReady = () => {
-    setChooserOpen(false);
-    if (useSession.getState().status === 'signed_in') {
+    setBusy(true);
+    try {
+      await connectWallet({ mode: 'walletconnect' });
+      await signIn();
       router.replace('/');
-      return;
+    } catch (err) {
+      setError(userMessage(err));
+    } finally {
+      setBusy(false);
     }
-    void finishSignIn();
   };
 
   const notice = error ?? sessionError;
   const connectLabel =
-    Platform.OS === 'web' ? 'Connect wallet (Freighter, xBull, Albedo…)' : 'Set up your wallet';
+    Platform.OS === 'web' ? 'Connect wallet (Freighter, xBull, Albedo…)' : 'Connect wallet';
 
   return (
     <Screen contentStyle={styles.content}>
@@ -174,7 +177,7 @@ export default function Login() {
         <Text variant="caption" color="text3">
           {Platform.OS === 'web'
             ? `Set Freighter to ${networkLabel()} before signing in.`
-            : `Create a wallet on this device, or sign with Freighter mobile, Lobstr or xBull on ${networkLabel()}.`}
+            : `Connects over WalletConnect — Freighter, Lobstr or xBull on ${networkLabel()}.`}
         </Text>
       </Card>
 
@@ -202,11 +205,6 @@ export default function Login() {
         />
       </View>
 
-      <WalletChooserSheet
-        visible={chooserOpen}
-        onClose={() => setChooserOpen(false)}
-        onConnected={onWalletReady}
-      />
       <WalletConnectSheet uri={pairingUri} onClose={cancelPairing} />
     </Screen>
   );
