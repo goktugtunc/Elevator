@@ -3,7 +3,7 @@ import { StyleSheet, View } from 'react-native';
 
 import { BottomSheet, Button, Field, Text } from '@/components/ui';
 import type { ListingOut, OfferCreateIn } from '@/lib/api/types';
-import { formatAmount, formatDuration, parseNumberInput } from '@/lib/format';
+import { formatAmount, formatBps, formatDuration, parseNumberInput } from '@/lib/format';
 import { colors, radius, spacing } from '@/theme';
 
 /**
@@ -33,11 +33,19 @@ export function OfferSheet({
   error,
 }: OfferSheetProps) {
   const assetCode = listing?.base_asset?.code ?? '';
-  const [amount, setAmount] = useState(listing?.amount ?? '');
+  // Ön-doldurma ilan türüne göre ayrışır: sermaye ilanında tutar ve süre
+  // ilandan gelir (trader teklif veriyor), hizmet ilanında komisyon trader'ın
+  // ilanındaki orandır (müşteri teklif veriyor) — diğerlerini kullanıcı girer.
+  const isService = listing?.kind === 'service';
+  const [amount, setAmount] = useState(
+    isService ? (listing?.min_capital ?? '') : (listing?.amount ?? ''),
+  );
   const [duration, setDuration] = useState(
     listing?.duration_days ? String(listing.duration_days) : '',
   );
-  const [commission, setCommission] = useState('');
+  const [commission, setCommission] = useState(
+    isService && listing?.commission_bps != null ? String(listing.commission_bps / 100) : '',
+  );
   const [returnMin, setReturnMin] = useState('');
   const [returnMax, setReturnMax] = useState('');
   const [note, setNote] = useState('');
@@ -87,8 +95,13 @@ export function OfferSheet({
     >
       {listing ? (
         <Text variant="caption" color="text3">
-          Listing asks for {formatAmount(listing.amount, assetCode)} ·{' '}
-          {formatDuration(listing.duration_days)}
+          {isService
+            ? `Trader asks ${formatBps(listing.commission_bps)} commission${
+                listing.min_capital ? ` · min ${formatAmount(listing.min_capital, assetCode)}` : ''
+              }`
+            : `Listing asks for ${formatAmount(listing.amount, assetCode)} · ${formatDuration(
+                listing.duration_days,
+              )}`}
         </Text>
       ) : null}
 

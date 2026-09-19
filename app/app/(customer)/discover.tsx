@@ -3,11 +3,11 @@ import { Check, Heart, RotateCcw, X } from 'lucide-react-native';
 import { useCallback, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
-import { ListingCard, SwipeDeck, type SwipeDeckHandle } from '@/components/discover';
+import { ListingCard, OfferSheet, SwipeDeck, type SwipeDeckHandle } from '@/components/discover';
 import { Screen, ScreenHeader } from '@/components/layout';
 import { Button, Card, Text } from '@/components/ui';
-import { discoverApi, tradersApi } from '@/lib/api';
-import type { DiscoverCardOut, InteractionAction } from '@/lib/api/types';
+import { discoverApi, offersApi, tradersApi } from '@/lib/api';
+import type { DiscoverCardOut, InteractionAction, OfferCreateIn } from '@/lib/api/types';
 import { userMessage } from '@/lib/errors';
 import { colors, layout, radius, shadow, spacing } from '@/theme';
 
@@ -20,6 +20,7 @@ export default function CustomerDiscover() {
   const deckRef = useRef<SwipeDeckHandle>(null);
   const [top, setTop] = useState<DiscoverCardOut | null>(null);
   const [notice, setNotice] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
+  const [offerTarget, setOfferTarget] = useState<DiscoverCardOut | null>(null);
   const [deckKey, setDeckKey] = useState(0);
 
   const feed = useQuery({
@@ -33,6 +34,22 @@ export default function CustomerDiscover() {
     onError: (err) => setNotice({ tone: 'error', text: userMessage(err) }),
   });
 
+  // Teklif gönderildikten sonra kartı akıştan düşürmek için etkileşim de yazılır;
+  // `offer_request` tek başına yalnızca kartı işaretliyor, teklif oluşturmuyor.
+  const createOffer = useMutation({
+    mutationFn: (draft: OfferCreateIn) => offersApi.create(draft),
+    onSuccess: (_offer, draft) => {
+      const card = offerTarget;
+      setOfferTarget(null);
+      setNotice({ tone: 'ok', text: 'Your offer was sent to the trader.' });
+      if (card) {
+        act.mutate({ card, action: 'offer_request' });
+        deckRef.current?.swipe('right');
+      }
+      void draft;
+    },
+  });
+
   const follow = useMutation({
     mutationFn: (card: DiscoverCardOut) => tradersApi.follow(card.listing.owner_id),
     onSuccess: () => setNotice({ tone: 'ok', text: 'Trader added to your following list.' }),
@@ -42,17 +59,15 @@ export default function CustomerDiscover() {
   const onSwipe = useCallback(
     (card: DiscoverCardOut, direction: 'left' | 'right') => {
       setNotice(null);
-      const action: InteractionAction = direction === 'right' ? 'offer_request' : 'pass';
-      act.mutate(
-        { card, action },
-        {
-          onSuccess: () => {
-            if (action === 'offer_request') {
-              setNotice({ tone: 'ok', text: 'Your interest was sent to the trader.' });
-            }
-          },
-        },
-      );
+      if (direction === 'right') {
+        // Sağa kaydırma "ilgilendim" değil, teklif demektir: sunucuda teklif
+        // ancak POST /offers ile oluşuyor, `offer_request` yalnızca kartı
+        // işaretliyor. Eskiden kullanıcıya "teklifiniz gönderildi" deniyordu
+        // ama trader'ın haberi olmuyordu.
+        setOfferTarget(card);
+        return;
+      }
+      act.mutate({ card, action: 'pass' });
     },
     [act],
   );
@@ -155,6 +170,18 @@ export default function CustomerDiscover() {
           </View>
         ) : null}
       </View>
+      <OfferSheet
+        key={offerTarget?.listing.id ?? 'offer-sheet'}
+        listing={offerTarget?.listing ?? null}
+        visible={offerTarget !== null}
+        onClose={() => {
+          setOfferTarget(null);
+          createOffer.reset();
+        }}
+        submitting={createOffer.isPending}
+        error={createOffer.isError ? userMessage(createOffer.error) : null}
+        onSubmit={(draft) => createOffer.mutate(draft)}
+      />
     </Screen>
   );
 }
