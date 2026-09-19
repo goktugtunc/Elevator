@@ -9,7 +9,7 @@ Bu yüzden development build gerekmez.
 | Gereken | Neden | Durum |
 |---|---|---|
 | — | Uygulama içi cüzdan hiçbir dış servis istemez | ✅ zorunlu ön koşul yok |
-| `EXPO_PUBLIC_WALLETCONNECT_PROJECT_ID` | Yalnızca WalletConnect seçeneği için; boşsa o seçenek görünmez | ⬜ isteğe bağlı |
+| `EXPO_PUBLIC_WALLETCONNECT_PROJECT_ID` | Yalnızca WalletConnect seçeneği için; boşsa o seçenek görünmez | ✅ bu makinedeki `app/.env`'de dolu (git'e girmez — ekipteki herkes kendi kopyasına yazmalı) |
 | Xcode (App Store) | Yalnızca simülatör için gerekir; Expo Go yolu Xcode istemez | ⬜ bu makinede yalnızca Command Line Tools var |
 | Lobstr ya da xBull (telefonda) | Yalnızca SEP-7 yolu için; uygulama içi cüzdanda gerekmez | ⬜ |
 | Expo Go (telefonda) | Uygulamayı derlemeden çalıştırır | ⬜ App Store / Play Store |
@@ -85,7 +85,7 @@ ile okut → "Connect wallet" → "Open in Lobstr".
 | Nerede | Nasıl | Durum |
 |---|---|---|
 | **Web** (`npm run web`) | Giriş ekranında **Connect Freighter** düğmesi — uzantı kuruluysa modal bile açılmaz, doğrudan bağlanır. Kurulu değilse "Install Freighter" görünür. | ✅ hazır |
-| **Mobil** (Expo Go) | Freighter mobile **yalnızca WalletConnect** ile bağlanır (Freighter'ın kendi belgeleri: `docs.freighter.app/mobile-walletconnect`, desteklenen yöntemler `stellar_signXDR`, `stellar_signAndSubmitXDR`, `stellar_signMessage`, `stellar_signAuthEntry`). SEP-7 desteği belgelenmemiş. | ⬜ `EXPO_PUBLIC_WALLETCONNECT_PROJECT_ID` gerekli |
+| **Mobil** (Expo Go) | Freighter mobile **yalnızca WalletConnect** ile bağlanır (Freighter'ın kendi belgeleri: `docs.freighter.app/mobile-walletconnect`, desteklenen yöntemler `stellar_signXDR`, `stellar_signAndSubmitXDR`, `stellar_signMessage`, `stellar_signAuthEntry`). SEP-7 desteği belgelenmemiş. | 🟡 proje kimliği tanımlı ve relay el sıkışması doğrulandı; telefonda deneme bekliyor |
 
 Yani telefonda Freighter isteniyorsa WalletConnect proje kimliği zorunlu — bu bizim
 tercihimiz değil, Freighter'ın entegrasyon yolu böyle. Kimlik girilince cüzdan
