@@ -103,6 +103,13 @@ export const walletConnectWallet: WalletAdapter = {
   async connect(options?: ConnectOptions) {
     try {
       const provider = await getProvider();
+      // Önceki deneme yarıda kaldıysa (kullanıcı QR ekranını kapattı) temizle;
+      // aksi hâlde connect() promise'i askıda kalıp dinleyici biriktiriyor.
+      try {
+        provider.abortPairingAttempt();
+      } catch {
+        /* bekleyen deneme yoksa sorun değil */
+      }
 
       // Zaten kurulu bir oturum varsa cüzdanı tekrar yormayalım.
       const existing = sessionAddress(provider);
@@ -127,6 +134,18 @@ export const walletConnectWallet: WalletAdapter = {
     } catch (err) {
       throw mapError(err);
     }
+  },
+
+  /** QR ekranı kapatıldığında bekleyen eşleşmeyi bırakır. */
+  async abortPairing() {
+    const provider = await getProvider().catch(() => null);
+    if (!provider) return;
+    try {
+      provider.abortPairingAttempt();
+    } catch {
+      /* bekleyen deneme yoktu */
+    }
+    await provider.cleanupPendingPairings().catch(() => undefined);
   },
 
   async disconnect() {

@@ -67,6 +67,10 @@ export const wallet: WalletAdapter = {
     return { address, walletId: 'local' };
   },
 
+  async abortPairing() {
+    await walletConnectWallet.abortPairing?.();
+  },
+
   async disconnect() {
     if (mode === 'walletconnect') await walletConnectWallet.disconnect();
     // Yerel cüzdan çıkışta silinmez: kullanıcı aynı adresle geri dönebilsin.

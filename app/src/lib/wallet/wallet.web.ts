@@ -58,6 +58,11 @@ export const wallet: WalletAdapter = {
     }
   },
 
+  /** Web'de bekleyen eşleşme kavramı yok; Kit kendi modalını yönetir. */
+  async abortPairing() {
+    /* no-op */
+  },
+
   async disconnect() {
     ensureInit();
     await StellarWalletsKit.disconnect();

@@ -178,6 +178,7 @@ export const useSession = create<SessionState>((set, get) => ({
 
   cancelPairing() {
     set({ pairingUri: null });
+    void wallet.abortPairing?.();
   },
 
   async signIn() {

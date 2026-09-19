@@ -34,6 +34,11 @@ export interface WalletAdapter {
     xdr: string,
     opts?: { networkPassphrase?: string; address?: string },
   ): Promise<string>;
+  /**
+   * Bekleyen eşleşme denemesini iptal eder (kullanıcı QR ekranını kapattığında).
+   * Yalnızca WalletConnect yolunda anlamlıdır.
+   */
+  abortPairing?(): Promise<void>;
   /** Soroban auth entry imzalar (çok taraflı yetkilendirme). */
   signAuthEntry?(
     authEntryXdr: string,
