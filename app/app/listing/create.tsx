@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { Screen, TopBar } from '@/components/layout';
-import { Button, Card, Chip, Field, Progress, Text } from '@/components/ui';
+import { Button, Card, Chip, ErrorNotice, Field, Progress, Text } from '@/components/ui';
 import { listingsApi, metaApi } from '@/lib/api';
 import type {
   ListingCreateIn,
@@ -12,7 +12,6 @@ import type {
   RiskProfile,
   UserRole,
 } from '@/lib/api/types';
-import { userMessage } from '@/lib/errors';
 import { formatAmount, parseNumberInput } from '@/lib/format';
 import { useSession } from '@/store/session';
 import { colors, radius, spacing } from '@/theme';
@@ -338,14 +337,7 @@ export default function CreateListing() {
               )}
             </View>
             {create.isError ? (
-              <View style={styles.errorBox}>
-                <Text variant="captionStrong" color="loss">
-                  Could not publish
-                </Text>
-                <Text variant="caption" color="text2">
-                  {userMessage(create.error)}
-                </Text>
-              </View>
+              <ErrorNotice title="Could not publish" error={create.error} />
             ) : null}
           </Card>
         ) : null}

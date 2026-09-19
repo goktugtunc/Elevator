@@ -6,6 +6,7 @@ import {
   BottomSheet,
   Button,
   Chip,
+  ErrorNotice,
   Field,
   SlideToConfirm,
   Switch,
@@ -13,7 +14,6 @@ import {
 } from '@/components/ui';
 import { agreementsApi, metaApi } from '@/lib/api';
 import type { AgreementOut } from '@/lib/api/types';
-import { userMessage } from '@/lib/errors';
 import { formatAmount, formatBps, parseNumberInput } from '@/lib/format';
 import { phaseLabel, useOnchainAction } from '@/lib/onchain';
 import { colors, radius, spacing } from '@/theme';
@@ -165,13 +165,7 @@ export function NewTradeSheet({
           </Text>
         ) : null}
 
-        {quote.isError ? (
-          <View style={styles.errorBox}>
-            <Text variant="caption" color="loss">
-              {userMessage(quote.error)}
-            </Text>
-          </View>
-        ) : null}
+        {quote.isError ? <ErrorNotice title="Could not get a quote" error={quote.error} /> : null}
 
         {quote.data ? (
           <View style={[styles.quote, !quote.data.allowed && styles.quoteBlocked]}>
@@ -216,16 +210,7 @@ export function NewTradeSheet({
           hint="Sends a push notification when the trade lands on-chain."
         />
 
-        {tx.error ? (
-          <View style={styles.errorBox}>
-            <Text variant="captionStrong" color="loss">
-              Trade failed
-            </Text>
-            <Text variant="caption" color="text2">
-              {tx.error}
-            </Text>
-          </View>
-        ) : null}
+        {tx.error ? <ErrorNotice title="Trade failed" error={tx.error} /> : null}
 
         {!quote.data?.allowed && ready && !quote.isFetching && !quote.isError ? (
           <Button title="Refresh quote" variant="secondary" onPress={reset} />

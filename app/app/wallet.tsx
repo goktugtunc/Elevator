@@ -11,6 +11,7 @@ import {
   Button,
   Card,
   Chip,
+  ErrorNotice,
   Field,
   ListRow,
   Pill,
@@ -322,11 +323,7 @@ export default function Wallet() {
           />
 
           {transfer.isError ? (
-            <View style={styles.errorBox}>
-              <Text variant="caption" color="loss">
-                {userMessage(transfer.error)}
-              </Text>
-            </View>
+            <ErrorNotice title="Transfer could not start" error={transfer.error} />
           ) : null}
 
           <Text variant="caption" color="text3">

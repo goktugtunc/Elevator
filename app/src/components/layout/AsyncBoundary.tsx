@@ -1,9 +1,8 @@
 import type { UseQueryResult } from '@tanstack/react-query';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
-import { Button, Text } from '@/components/ui';
-import { userMessage } from '@/lib/errors';
-import { colors, radius, spacing } from '@/theme';
+import { ErrorNotice, Text } from '@/components/ui';
+import { colors, spacing } from '@/theme';
 
 /**
  * Liste/panel ekranlarının ortak üç durumu: yükleniyor · hata · boş.
@@ -30,17 +29,7 @@ export function AsyncBoundary<T>({
     );
   }
   if (query.isError) {
-    return (
-      <View style={styles.error}>
-        <Text variant="captionStrong" color="loss">
-          Could not load
-        </Text>
-        <Text variant="caption" color="text2">
-          {userMessage(query.error)}
-        </Text>
-        <Button title="Try again" variant="secondary" size="sm" onPress={() => query.refetch()} />
-      </View>
-    );
+    return <ErrorNotice title="Could not load" error={query.error} onRetry={() => query.refetch()} />;
   }
   if (isEmpty?.(query.data) && empty) return <>{empty}</>;
   return <>{children(query.data)}</>;
@@ -73,13 +62,6 @@ export function EmptyState({
 
 const styles = StyleSheet.create({
   center: { paddingVertical: spacing['2xl'], alignItems: 'center' },
-  error: {
-    gap: spacing.sm,
-    padding: spacing.lg,
-    borderRadius: radius.md,
-    backgroundColor: colors.redBg,
-    alignItems: 'flex-start',
-  },
   empty: {
     gap: spacing.sm,
     paddingVertical: spacing['2xl'],

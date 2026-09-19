@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { ActivityIndicator, Platform, StyleSheet, View } from 'react-native';
 
 import { Screen } from '@/components/layout';
-import { Button, Card, Pill, Text } from '@/components/ui';
+import { Button, Card, ErrorNotice, Pill, Text } from '@/components/ui';
 import { WalletConnectSheet } from '@/components/wallet';
 import { metaApi } from '@/lib/api';
 import { networkLabel, userMessage } from '@/lib/errors';
@@ -187,13 +187,7 @@ export default function Login() {
         Signing in asks your wallet to sign a SEP-10 challenge. It is free and moves no funds.
       </Text>
 
-      {notice ? (
-        <View style={styles.notice}>
-          <Text variant="caption" color="loss" align="center">
-            {notice}
-          </Text>
-        </View>
-      ) : null}
+      {notice ? <ErrorNotice title="Could not connect" error={notice} /> : null}
 
       <View style={styles.footer}>
         <Text variant="body" color="text2">

@@ -3,10 +3,10 @@ import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { Screen, TopBar } from '@/components/layout';
-import { Button, Card, Chip, Field, Pill, Progress, Text } from '@/components/ui';
+import { Button, Card, Chip, ErrorNotice, Field, Pill, Progress, Text } from '@/components/ui';
 import type { MarketCategory, RegisterIn, RiskLevel, RiskProfile } from '@/lib/api/types';
 import { ApiError } from '@/lib/api/client';
-import { userMessage } from '@/lib/errors';
+import { fieldErrors, userMessage } from '@/lib/errors';
 import { parseNumberInput } from '@/lib/format';
 import { shortAddress } from '@/lib/stellar';
 import { useSession } from '@/store/session';
@@ -141,9 +141,13 @@ export default function RegisterDetails() {
       await register(payload);
       router.replace('/');
     } catch (err) {
-      // Alan bazlı çakışmayı formun tepesinde değil, ilgili alanın altında göster.
-      if (err instanceof ApiError && err.code === 'username_taken') {
-        setErrors({ username: 'That username is already taken. Pick another one.' });
+      // Sunucu hangi alanın hatalı olduğunu söylüyor; hatayı formun tepesinde
+      // değil ilgili girdinin altında göster. Eşleşen alan yoksa üstteki kutuya
+      // düşer — hiçbir hata sessizce kaybolmaz.
+      const mapped = mapServerFields(err);
+      if (Object.keys(mapped).length > 0) {
+        setErrors(mapped);
+        setFormError(null);
       } else {
         setFormError(userMessage(err));
       }
@@ -293,16 +297,7 @@ export default function RegisterDetails() {
           </>
         )}
 
-        {formError ? (
-          <View style={styles.errorBox}>
-            <Text variant="captionStrong" color="loss">
-              Sign-up failed
-            </Text>
-            <Text variant="caption" color="text2">
-              {formError}
-            </Text>
-          </View>
-        ) : null}
+        {formError ? <ErrorNotice title="Sign-up failed" error={formError} /> : null}
 
         <Button title="Create account" fullWidth loading={busy} onPress={onSubmit} />
         <Text variant="caption" color="text3" align="center">
@@ -311,6 +306,36 @@ export default function RegisterDetails() {
       </View>
     </Screen>
   );
+}
+
+/**
+ * Sunucunun alan adlarını formun alan adlarına çevirir.
+ * `loc` gövdede iç içe olabiliyor (`["body","customer","budget_amount"]`);
+ * `fieldErrors` son parçayı verdiği için burada yalnızca isim eşlemesi kalıyor.
+ */
+const SERVER_FIELD_MAP: Record<string, string> = {
+  username: 'username',
+  display_name: 'displayName',
+  markets: 'markets',
+  budget_amount: 'budget',
+  risk_profile: 'risk',
+  risk_level: 'risk',
+  strategy_summary: 'strategy',
+  commission_bps: 'commission',
+  min_capital: 'minCapital',
+};
+
+function mapServerFields(err: unknown): Errors {
+  const out: Errors = {};
+  if (err instanceof ApiError && err.code === 'username_taken') {
+    out.username = 'That username is already taken. Pick another one.';
+    return out;
+  }
+  for (const [field, msg] of Object.entries(fieldErrors(err))) {
+    const target = SERVER_FIELD_MAP[field];
+    if (target) out[target] = msg;
+  }
+  return out;
 }
 
 function ChipGroup({

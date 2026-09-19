@@ -8,6 +8,7 @@ import { AsyncBoundary, EmptyState, Screen, TopBar } from '@/components/layout';
 import {
   Button,
   Card,
+  ErrorNotice,
   KpiBox,
   ListRow,
   Pill,
@@ -402,16 +403,7 @@ function Actions({
               {phaseLabel(tx.phase)}
             </Text>
           ) : null}
-          {tx.error ? (
-            <View style={styles.errorBox}>
-              <Text variant="captionStrong" color="loss">
-                Transaction failed
-              </Text>
-              <Text variant="caption" color="text2">
-                {tx.error}
-              </Text>
-            </View>
-          ) : null}
+          {tx.error ? <ErrorNotice title="Transaction failed" error={tx.error} /> : null}
           {tx.result?.ok ? (
             <Text variant="caption" color={colors.profit}>
               Done — the agreement is now {tx.result.agreement_status ?? a.status}.

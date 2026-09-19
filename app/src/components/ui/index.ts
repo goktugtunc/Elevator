@@ -21,3 +21,4 @@ export type { SparklineProps } from './Sparkline';
 export { ListRow } from './ListRow';
 export { Card } from './Card';
 export { SlideToConfirm } from './SlideToConfirm';
+export { ErrorNotice } from './ErrorNotice';
