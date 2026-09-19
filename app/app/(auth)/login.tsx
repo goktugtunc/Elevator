@@ -3,7 +3,8 @@ import { useState } from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
 
 import { Screen } from '@/components/layout';
-import { Button, Card, Text } from '@/components/ui';
+import { Button, Card, Pill, Text } from '@/components/ui';
+import { networkLabel, userMessage } from '@/lib/errors';
 import { wallet } from '@/lib/wallet';
 import { useSession } from '@/store/session';
 import { colors, radius, spacing } from '@/theme';
@@ -12,25 +13,33 @@ import { colors, radius, spacing } from '@/theme';
  * Figma 1d · Giriş · Cüzdan ile (node 19:109)
  * Tasarımdaki MetaMask/Coinbase/Trust listesi Stellar'a uyarlandı (notlar §4.2):
  * web'de Stellar Wallets Kit modalı (Freighter, xBull, Albedo, Lobstr…), mobilde WalletConnect (sprint).
+ *
+ * FE-04: SEP-10 hataları (yanlış ağ, reddedilen imza, sunucuya ulaşılamadı) ve
+ * oturum süresi dolduğunda store'dan gelen uyarı burada gösterilir.
  */
 export default function Login() {
   const router = useRouter();
   const signIn = useSession((s) => s.signIn);
+  const sessionError = useSession((s) => s.error);
+  const clearError = useSession((s) => s.clearError);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const onConnect = async () => {
     setBusy(true);
     setError(null);
+    clearError();
     try {
       await signIn();
       router.replace('/');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Bağlantı kurulamadı');
+      setError(userMessage(err));
     } finally {
       setBusy(false);
     }
   };
+
+  const notice = error ?? sessionError;
 
   return (
     <Screen contentStyle={styles.content}>
@@ -43,6 +52,7 @@ export default function Login() {
       <Text variant="body" color="text2">
         Devam etmek için cüzdanını bağla
       </Text>
+      <Pill label={`Ağ: ${networkLabel()}`} tone="navy" />
 
       <Card style={styles.card}>
         {wallet.available ? (
@@ -63,7 +73,7 @@ export default function Login() {
         )}
         {Platform.OS === 'web' ? (
           <Text variant="caption" color="text3">
-            Freighter yüklü değilse: freighter.app
+            Freighter yüklü değilse: freighter.app · Cüzdanı {networkLabel()} ağına almayı unutma.
           </Text>
         ) : null}
       </Card>
@@ -72,10 +82,12 @@ export default function Login() {
         Giriş için cüzdanından bir SEP-10 imza isteği onaylarsın. Bu işlem için ücret alınmaz.
       </Text>
 
-      {error ? (
-        <Text variant="caption" color="loss" align="center">
-          {error}
-        </Text>
+      {notice ? (
+        <View style={styles.notice}>
+          <Text variant="caption" color="loss" align="center">
+            {notice}
+          </Text>
+        </View>
       ) : null}
 
       <View style={styles.footer}>
@@ -94,7 +106,13 @@ export default function Login() {
 }
 
 const styles = StyleSheet.create({
-  content: { flexGrow: 1, justifyContent: 'center', gap: spacing.md, paddingVertical: 40 },
+  content: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    alignItems: 'flex-start',
+    gap: spacing.md,
+    paddingVertical: 40,
+  },
   logo: {
     width: 64,
     height: 64,
@@ -104,11 +122,18 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: spacing.sm,
   },
-  card: { gap: spacing.md, marginTop: spacing.lg },
+  card: { gap: spacing.md, marginTop: spacing.lg, alignSelf: 'stretch' },
+  notice: {
+    alignSelf: 'stretch',
+    padding: spacing.md,
+    borderRadius: radius.md,
+    backgroundColor: colors.redBg,
+  },
   footer: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    alignSelf: 'stretch',
     gap: spacing.xs,
     marginTop: spacing.lg,
   },

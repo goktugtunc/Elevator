@@ -4,7 +4,8 @@ import { StyleSheet, View } from 'react-native';
 
 import { Screen, TopBar } from '@/components/layout';
 import { Button, Card, Chip, Field, Pill, Text } from '@/components/ui';
-import { ApiError, type RegisterPayload } from '@/lib/api';
+import { type RegisterPayload } from '@/lib/api';
+import { userMessage } from '@/lib/errors';
 import { parseTRNumber } from '@/lib/format';
 import { shortAddress } from '@/lib/stellar';
 import { useSession } from '@/store/session';
@@ -109,7 +110,7 @@ export default function RegisterDetails() {
       await register(payload);
       router.replace('/');
     } catch (err) {
-      setFormError(messageFor(err));
+      setFormError(userMessage(err));
     } finally {
       setBusy(false);
     }
@@ -154,7 +155,7 @@ export default function RegisterDetails() {
               loading={busy}
               onPress={() => {
                 setFormError(null);
-                signIn().catch((err) => setFormError(messageFor(err)));
+                signIn().catch((err) => setFormError(userMessage(err)));
               }}
             />
           )}
@@ -299,20 +300,6 @@ function ChipGroup({
       ) : null}
     </View>
   );
-}
-
-/** Backend/cüzdan hatalarını kullanıcıya Türkçe gösterir (sahte başarı yok). */
-function messageFor(err: unknown): string {
-  if (err instanceof ApiError) {
-    if (err.status === 401) return 'Oturum doğrulanamadı. Cüzdanınla tekrar giriş yap.';
-    if (err.status === 409) return 'Bu cüzdan ya da kullanıcı adı zaten kayıtlı.';
-    if (err.status === 422 || err.status === 400) return err.message;
-    return `Sunucu hatası (${err.status}). Lütfen tekrar dene.`;
-  }
-  if (err instanceof TypeError) {
-    return 'Sunucuya ulaşılamadı. Backend çalışmıyor olabilir (EXPO_PUBLIC_API_BASE_URL).';
-  }
-  return err instanceof Error ? err.message : 'Bilinmeyen bir hata oluştu.';
 }
 
 const styles = StyleSheet.create({

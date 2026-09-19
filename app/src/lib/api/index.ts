@@ -1,2 +1,3 @@
-export { http, ApiError } from './client';
+export { http, ApiError, registerAuthBridge } from './client';
+export type { AuthBridge } from './client';
 export * from './endpoints';

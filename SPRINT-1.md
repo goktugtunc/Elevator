@@ -33,7 +33,7 @@
 | FE-01 | ~~Proje kurulumu, tema, UI kit, navigasyon iskeleti~~ | DS 0:1 | L | — | Claude | ✅ |
 | FE-02 | ~~Onboarding + Giriş (cüzdan) + Rol Seçimi~~ | 19:13 · 19:109 · 19:181 | M | — | Claude | ✅ |
 | FE-03 | ~~Kayıt · Bilgiler formu (Müşteri / Trader varyantı), `session.register()` bağlantısı~~ | 19:269 · 19:353 | M | BE-01 (`POST /register`) | Claude | ✅ |
-| FE-04 | SEP-10 girişini gerçek backend'e bağla; JWT süresi/401 yenileme; hata mesajları (yanlış ağ, reddedilen imza) | 19:109 | S | BE-02 (`/auth/*`) | | ⬜ |
+| FE-04 | SEP-10 istemci tarafı: challenge doğrulama, JWT süresi/401 yenileme, hata mesajları (yanlış ağ, reddedilen imza) | 19:109 | S | BE-02 (`/auth/*`) | Claude | 🟡 |
 | FE-05 | Keşfet · kaydırmalı deck (gesture-handler + reanimated): kart bileşeni, sağa kaydırma = Teklif İste / Ver, sola = Geç, Takip Et/Kaydet | 21:30 · 21:282 | L | — (UI), BE-03 (`GET /listings`) | | ⬜ |
 | FE-06 | Keşfet · Trader varyantı + "Teklif Ver" bottom sheet (Komisyon, getiri aralığı, not) | 21:160 · 21:414 | M | FE-05 | | ⬜ |
 | FE-07 | Bottom Sheet + Switch + Progress ortak bileşenleri (Yeni İşlem, Görünümü Düzenle, Teklif Ver tarafından kullanılır) | 23:181 · 30:536 | S | — | | ⬜ |
@@ -55,6 +55,8 @@
 | FE-23 | Uçtan uca demo provası: giriş → ilan → yatırma → sözleşme → ödeme → çekim (Testnet, gerçek veri) | — | M | tüm BE-* | | ⬜ |
 
 **FE-03 notu:** Form, doğrulama ve `session.register()` bağlantısı hazır; gövde şeması `lib/api/endpoints.ts` içinde `CustomerRegisterPayload` / `TraderRegisterPayload` olarak tiplendi ve BE-01 için öneri niteliğinde. Backend ayağa kalkınca gerçek `POST /register` ile uçtan uca denenecek; şu an hata durumu ekranda gösteriliyor.
+
+**FE-04 notu (🟡 = istemci hazır, BE-02 bekleniyor):** Challenge imzalanmadan önce doğrulanıyor (sequence 0, zaman aralığı, istemci hesabına ait `manageData`, ağ passphrase'i). JWT'nin `exp` claim'i okunup saklanıyor; süresi dolmuş token'la açılışta girişe düşülüyor. 401 gelen her istek `registerAuthBridge` üzerinden bir kez SEP-10 yenilemesi deniyor (SEP-10'da refresh token yok → cüzdanda imza isteği açılır), başarısızsa oturum kapanıp giriş ekranında uyarı gösteriliyor. Hata metinleri tek kaynakta: `src/lib/errors.ts`. Gerçek `/auth/challenge` + `/auth/verify` ile uçtan uca doğrulama BE-02 ayağa kalkınca yapılacak.
 
 Backend'e bağımlı olmayan, hemen başlanabilecek işler: **FE-05, FE-07, FE-13, FE-20** ve tüm ekranların UI katmanı (veri bağlantısı sonra).
 
