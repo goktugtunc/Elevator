@@ -49,7 +49,10 @@ export function userMessage(err: unknown): string {
       case 404:
         return 'Not found.';
       case 409:
-        return 'This wallet or username is already registered.';
+        // Sunucu hangi alanın çakıştığını söylüyor (`code`, `message`);
+        // bunu genel bir cümleyle değiştirmek kullanıcıyı körleştiriyordu.
+        if (err.code === 'username_taken') return 'That username is already taken.';
+        return err.message || 'This wallet or username is already registered.';
       case 400:
       case 422:
         return err.message; // sunucunun alan bazlı mesajı

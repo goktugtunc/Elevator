@@ -179,9 +179,10 @@ export const useSession = create<SessionState>((set, get) => ({
       out = await usersApi.register(payload);
     } catch (err) {
       // 409 iki anlama gelir: cüzdan zaten kayıtlı ya da kullanıcı adı alınmış.
-      // İlkinde yeni bir SEP-10 girişi rolü taşıyan token'ı getirir ve akış açılır;
-      // rol yine gelmezse çakışma kullanıcı adındadır, hata olduğu gibi yükselir.
-      if (err instanceof ApiError && err.status === 409) {
+      // Cüzdan çakışmasında yeni bir SEP-10 girişi rolü taşıyan token'ı getirir ve
+      // akış açılır. Kullanıcı adı çakışmasında ise girişi tekrarlamak anlamsız —
+      // üstelik WalletConnect'te cüzdana gereksiz bir imza isteği düşürüyordu.
+      if (err instanceof ApiError && err.status === 409 && err.code !== 'username_taken') {
         await get().signIn();
         if (get().role) return;
       }

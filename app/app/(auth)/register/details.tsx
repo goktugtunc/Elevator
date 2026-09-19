@@ -5,6 +5,7 @@ import { StyleSheet, View } from 'react-native';
 import { Screen, TopBar } from '@/components/layout';
 import { Button, Card, Chip, Field, Pill, Progress, Text } from '@/components/ui';
 import type { MarketCategory, RegisterIn, RiskLevel, RiskProfile } from '@/lib/api/types';
+import { ApiError } from '@/lib/api/client';
 import { userMessage } from '@/lib/errors';
 import { parseNumberInput } from '@/lib/format';
 import { shortAddress } from '@/lib/stellar';
@@ -140,7 +141,12 @@ export default function RegisterDetails() {
       await register(payload);
       router.replace('/');
     } catch (err) {
-      setFormError(userMessage(err));
+      // Alan bazlı çakışmayı formun tepesinde değil, ilgili alanın altında göster.
+      if (err instanceof ApiError && err.code === 'username_taken') {
+        setErrors({ username: 'That username is already taken. Pick another one.' });
+      } else {
+        setFormError(userMessage(err));
+      }
     } finally {
       setBusy(false);
     }
