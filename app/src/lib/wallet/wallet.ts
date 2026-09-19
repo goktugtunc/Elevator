@@ -25,6 +25,13 @@ export function walletConnectAvailable(): boolean {
   return Boolean(env.walletConnectProjectId);
 }
 
+/** Web'deki Freighter kısayolunun native karşılığı yok: mobilde Freighter WalletConnect ile gelir. */
+export const FREIGHTER_WALLET_ID = 'freighter';
+
+export async function isFreighterAvailable(): Promise<boolean> {
+  return false;
+}
+
 export async function restoreWalletMode(): Promise<NativeWalletMode> {
   const stored = await plainStorage.get(STORAGE_KEYS.walletMode);
   mode = stored === 'walletconnect' && walletConnectAvailable() ? 'walletconnect' : 'local';

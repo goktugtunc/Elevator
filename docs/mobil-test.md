@@ -80,7 +80,21 @@ bu yüzden deep link butonları simülatörde iş görmez. **QR yolu çalışır
 Gerçek telefonda test (deep link dâhil): `npx expo start` → QR'ı **Expo Go**
 ile okut → "Connect wallet" → "Open in Lobstr".
 
-## 5. Bilinen sınırlar
+## 5. Freighter ile bağlanmak
+
+| Nerede | Nasıl | Durum |
+|---|---|---|
+| **Web** (`npm run web`) | Giriş ekranında **Connect Freighter** düğmesi — uzantı kuruluysa modal bile açılmaz, doğrudan bağlanır. Kurulu değilse "Install Freighter" görünür. | ✅ hazır |
+| **Mobil** (Expo Go) | Freighter mobile **yalnızca WalletConnect** ile bağlanır (Freighter'ın kendi belgeleri: `docs.freighter.app/mobile-walletconnect`, desteklenen yöntemler `stellar_signXDR`, `stellar_signAndSubmitXDR`, `stellar_signMessage`, `stellar_signAuthEntry`). SEP-7 desteği belgelenmemiş. | ⬜ `EXPO_PUBLIC_WALLETCONNECT_PROJECT_ID` gerekli |
+
+Yani telefonda Freighter isteniyorsa WalletConnect proje kimliği zorunlu — bu bizim
+tercihimiz değil, Freighter'ın entegrasyon yolu böyle. Kimlik girilince cüzdan
+seçim ekranında "WalletConnect" seçeneği belirir; QR ya da "Open installed wallet"
+ile Freighter mobile açılır.
+
+Uzantıyı ve mobil uygulamayı **Testnet**'e almayı unutmayın (Freighter → Settings → Network).
+
+## 6. Bilinen sınırlar
 
 - SEP-10 girişi backend'in `/api/v1/auth/*` uçları açılana kadar hata gösterir
   (BE-02). Cüzdan bağlantısının kendisi backend'den bağımsız çalışır.

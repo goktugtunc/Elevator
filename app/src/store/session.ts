@@ -37,7 +37,7 @@ interface SessionState {
 
   hydrate: () => Promise<void>;
   markOnboardingSeen: () => Promise<void>;
-  connectWallet: (mode?: NativeWalletMode) => Promise<string>;
+  connectWallet: (options?: { mode?: NativeWalletMode; walletId?: string }) => Promise<string>;
   cancelPairing: () => void;
   /** Uygulama içi cüzdan: var olanı yükler, yoksa üretir. */
   useLocalWallet: () => Promise<string>;
@@ -127,18 +127,19 @@ export const useSession = create<SessionState>((set, get) => ({
     set({ onboardingSeen: true });
   },
 
-  async connectWallet(mode) {
+  async connectWallet(options) {
     set({ error: null, pairingUri: null });
     try {
       const { address } = await wallet.connect({
-        mode,
+        mode: options?.mode,
+        walletId: options?.walletId,
         onUri: (uri) => set({ pairingUri: uri }),
       });
       set({
         address,
         status: 'wallet_connected',
         pairingUri: null,
-        walletMode: mode ?? get().walletMode ?? 'local',
+        walletMode: options?.mode ?? get().walletMode ?? 'local',
       });
       return address;
     } catch (err) {

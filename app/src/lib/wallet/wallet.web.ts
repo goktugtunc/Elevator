@@ -6,6 +6,7 @@
  * WalletConnect modülü ekstra kurulum ister (projectId) — mobil sprintinde eklenecek.
  */
 import { StellarWalletsKit } from '@creit.tech/stellar-wallets-kit/sdk';
+import { FREIGHTER_ID, FreighterModule } from '@creit.tech/stellar-wallets-kit/modules/freighter';
 import { defaultModules } from '@creit.tech/stellar-wallets-kit/modules/utils';
 import { Networks as KitNetworks } from '@creit.tech/stellar-wallets-kit/types';
 
@@ -38,10 +39,18 @@ function mapError(err: unknown): WalletError {
 export const wallet: WalletAdapter = {
   available: true,
 
-  // Web'de cüzdan seçimini Kit'in kendi modalı yapar; ConnectOptions kullanılmaz.
-  async connect(_options?: ConnectOptions) {
+  /**
+   * `walletId` verilirse (ör. Freighter) modal açılmadan doğrudan o cüzdan
+   * kullanılır; verilmezse Kit'in cüzdan seçim modalı açılır.
+   */
+  async connect(options?: ConnectOptions) {
     ensureInit();
     try {
+      if (options?.walletId) {
+        StellarWalletsKit.setWallet(options.walletId);
+        const { address } = await StellarWalletsKit.getAddress();
+        return { address, walletId: options.walletId };
+      }
       const { address } = await StellarWalletsKit.authModal();
       return { address, walletId: StellarWalletsKit.selectedModule?.productId };
     } catch (err) {
@@ -99,6 +108,18 @@ export type NativeWalletMode = 'local' | 'walletconnect';
 
 export function walletConnectAvailable(): boolean {
   return false;
+}
+
+/** Stellar Wallets Kit'teki Freighter modülünün kimliği. */
+export const FREIGHTER_WALLET_ID = FREIGHTER_ID;
+
+/** Freighter uzantısı tarayıcıda kurulu mu? */
+export async function isFreighterAvailable(): Promise<boolean> {
+  try {
+    return await new FreighterModule().isAvailable();
+  } catch {
+    return false;
+  }
 }
 
 export async function restoreWalletMode(): Promise<NativeWalletMode> {

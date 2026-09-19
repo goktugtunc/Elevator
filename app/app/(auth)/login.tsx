@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import * as Linking from 'expo-linking';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { ActivityIndicator, Platform, StyleSheet, View } from 'react-native';
@@ -9,6 +10,7 @@ import { WalletChooserSheet, WalletConnectSheet } from '@/components/wallet';
 import { metaApi } from '@/lib/api';
 import { networkLabel, userMessage } from '@/lib/errors';
 import { stellarConfig } from '@/lib/stellar';
+import { FREIGHTER_WALLET_ID, isFreighterAvailable } from '@/lib/wallet';
 import { useSession } from '@/store/session';
 import { colors, radius, spacing } from '@/theme';
 
@@ -24,6 +26,7 @@ import { colors, radius, spacing } from '@/theme';
 export default function Login() {
   const router = useRouter();
   const signIn = useSession((s) => s.signIn);
+  const connectWallet = useSession((s) => s.connectWallet);
   const sessionError = useSession((s) => s.error);
   const clearError = useSession((s) => s.clearError);
   const pairingUri = useSession((s) => s.pairingUri);
@@ -43,12 +46,36 @@ export default function Login() {
     backend.data !== undefined &&
     backend.data.network_passphrase !== stellarConfig.networkPassphrase;
 
+  // Freighter uzantısı kurulu mu? (yalnızca web'de anlamlı)
+  const freighter = useQuery({
+    queryKey: ['wallet', 'freighter'],
+    queryFn: isFreighterAvailable,
+    enabled: Platform.OS === 'web',
+    staleTime: 30_000,
+  });
+
   /** Cüzdan hazır → SEP-10 ile giriş. SEP-7 yolunda giriş zaten tamamlanmıştır. */
   const finishSignIn = async () => {
     setBusy(true);
     setError(null);
     clearError();
     try {
+      await signIn();
+      router.replace('/');
+    } catch (err) {
+      setError(userMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** Web: modal açmadan doğrudan Freighter ile bağlan, ardından SEP-10 girişi. */
+  const onConnectFreighter = async () => {
+    setBusy(true);
+    setError(null);
+    clearError();
+    try {
+      await connectWallet({ walletId: FREIGHTER_WALLET_ID });
       await signIn();
       router.replace('/');
     } catch (err) {
@@ -118,11 +145,36 @@ export default function Login() {
       </View>
 
       <Card style={styles.card}>
-        <Button title={connectLabel} onPress={onConnect} loading={busy} fullWidth />
+        {Platform.OS === 'web' && freighter.data ? (
+          <>
+            <Button
+              title="Connect Freighter"
+              onPress={onConnectFreighter}
+              loading={busy}
+              fullWidth
+            />
+            <Button
+              title="Other wallets (xBull, Albedo, Lobstr…)"
+              variant="secondary"
+              onPress={onConnect}
+              fullWidth
+            />
+          </>
+        ) : (
+          <Button title={connectLabel} onPress={onConnect} loading={busy} fullWidth />
+        )}
+        {Platform.OS === 'web' && freighter.isFetched && !freighter.data ? (
+          <Button
+            title="Install Freighter"
+            variant="ghost"
+            onPress={() => Linking.openURL('https://www.freighter.app/')}
+            fullWidth
+          />
+        ) : null}
         <Text variant="caption" color="text3">
           {Platform.OS === 'web'
-            ? `No Freighter yet? Get it at freighter.app — and switch it to ${networkLabel()}.`
-            : `Create a wallet on this device, or sign with Lobstr / xBull on ${networkLabel()}.`}
+            ? `Set Freighter to ${networkLabel()} before signing in.`
+            : `Create a wallet on this device, or sign with Freighter mobile, Lobstr or xBull on ${networkLabel()}.`}
         </Text>
       </Card>
 

@@ -14,6 +14,11 @@ export interface ConnectOptions {
    * WalletConnect. Verilmezse son seçilen yol sürer.
    */
   mode?: 'local' | 'walletconnect';
+  /**
+   * Web'de belirli bir cüzdanı doğrudan seçer (ör. Freighter) — modal açılmaz.
+   * Stellar Wallets Kit modül kimliği beklenir.
+   */
+  walletId?: string;
 }
 
 export interface WalletAdapter {

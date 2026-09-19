@@ -10,9 +10,17 @@ import { colors, radius, spacing } from '@/theme';
 /**
  * Mobil cüzdan bağlantısı (FE-13) — WalletConnect v2 eşleşme ekranı.
  * Aynı cihazdaki cüzdan için deep link, başka cihaz/masaüstü için QR.
- * Stellar tarafında WalletConnect'i destekleyen cüzdanlar: Lobstr, xBull.
+ * WalletConnect'i destekleyen Stellar cüzdanları: Freighter mobile, Lobstr, xBull.
+ * (Freighter mobile yalnızca WalletConnect ile bağlanır — kendi belgeleri böyle diyor.)
  */
 const WALLETS: { id: string; label: string; scheme: (uri: string) => string }[] = [
+  {
+    // Freighter mobile için belgelenmiş bir özel şema yok: ham wc: URI'si
+    // cihazdaki WalletConnect uyumlu uygulamaya yönlendirilir.
+    id: 'any',
+    label: 'Open installed wallet (Freighter…)',
+    scheme: (uri) => uri,
+  },
   {
     id: 'lobstr',
     label: 'Open in Lobstr',
@@ -88,7 +96,8 @@ export function WalletConnectSheet({ uri, onClose }: { uri: string | null; onClo
 
           <Text variant="caption" color="text3">
             Scan the code with a wallet on another device, or tap a button above to open a wallet
-            installed on this phone. Connecting costs nothing — you only sign a login message.
+            installed on this phone — Freighter mobile, Lobstr and xBull all speak WalletConnect.
+            Connecting costs nothing — you only sign a login message.
           </Text>
         </>
       ) : null}

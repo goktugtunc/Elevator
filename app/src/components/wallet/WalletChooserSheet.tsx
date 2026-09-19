@@ -156,13 +156,13 @@ export function WalletChooserSheet({
             <Option
               icon={<WalletIcon size={18} color={colors.navy900} />}
               title="WalletConnect"
-              body="Pair with a wallet over WalletConnect v2."
+              body="Pair with Freighter mobile, Lobstr or xBull over WalletConnect v2."
               action={
                 <Button
                   title="Connect over WalletConnect"
                   variant="secondary"
                   fullWidth
-                  onPress={() => run(() => connectWallet('walletconnect'), onConnected)}
+                  onPress={() => run(() => connectWallet({ mode: 'walletconnect' }), onConnected)}
                 />
               }
             />

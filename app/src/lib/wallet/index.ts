@@ -1,4 +1,10 @@
-export { wallet, walletConnectAvailable, restoreWalletMode } from './wallet';
+export {
+  wallet,
+  walletConnectAvailable,
+  restoreWalletMode,
+  isFreighterAvailable,
+  FREIGHTER_WALLET_ID,
+} from './wallet';
 export type { NativeWalletMode } from './wallet';
 export { localWallet } from './local';
 export { buildSep7TxUri, buildSignInUri, openInWallet, SEP7_SCHEME } from './sep7';

@@ -98,6 +98,7 @@ Backend beklemeden ilerletilebilecek işler: **FE-12 / FE-14** (FE-07 bileşenle
 - **Uygulama içi cüzdan:** anahtar çifti cihazda üretilir, `expo-secure-store` (iOS Keychain / Android Keystore) içinde kalır, imza cihazda atılır; gizli anahtar hiçbir yere gönderilmez. İçe aktarma (S…) ve yedekleme de var. Doğrulandı: `WebAuth.buildChallengeTx` ile üretilen SEP-10 challenge bu yolla imzalanınca `WebAuth.verifyChallengeTxSigners`'dan geçiyor, yanlış anahtar reddediliyor.
 - **SEP-7 (Lobstr, xBull):** `web+stellar:tx?xdr=…&callback=url:<api>/auth/sep7-callback` linki cüzdanı açar; imzalı XDR **doğrudan kendi backend'imize** POST edilir, uygulama `GET /auth/sep7-status/{id}` ile bekler. Sözleşme: [docs/backend-sozlesme.md](docs/backend-sozlesme.md).
 - **WalletConnect:** kod duruyor ama isteğe bağlı — `EXPO_PUBLIC_WALLETCONNECT_PROJECT_ID` tanımlıysa seçim ekranında görünür, yoksa hiç çıkmaz. Böylece reown relay'ine bağımlılık zorunlu olmaktan çıktı.
+- **Freighter:** web'de giriş ekranında doğrudan **Connect Freighter** düğmesi var (Wallets Kit modülü, modal açılmadan). Mobilde Freighter **yalnızca WalletConnect** ile bağlanıyor (kaynak: `docs.freighter.app/mobile-walletconnect`), yani telefonda Freighter isteniyorsa proje kimliği zorunlu.
 
 **Açık kalanlar**
 
