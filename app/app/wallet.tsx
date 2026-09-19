@@ -55,7 +55,7 @@ export default function Wallet() {
 
   const wallet = useQuery({
     queryKey: ['wallet'],
-    queryFn: () => walletApi.get(true),
+    queryFn: () => walletApi.get(20),
   });
 
   const depositInfo = useQuery({

@@ -107,7 +107,7 @@ export const metaApi = {
 // --- Kimlik doğrulama (SEP-10) ---
 export const authApi = {
   /** Challenge XDR üretir. Cüzdan bunu imzalar. */
-  sep10Challenge: (account: string, memo?: string) =>
+  sep10Challenge: (account: string, memo?: number) =>
     http.get<Sep10ChallengeOut>(`${V1}/auth/sep10`, { account, memo }, false),
   /** İmzalı challenge → JWT + kayıt durumu. */
   sep10Verify: (transaction: string) =>
@@ -293,7 +293,8 @@ export const notificationsApi = {
 
 // --- Cüzdan & anchor ---
 export const walletApi = {
-  get: (movements?: boolean) => http.get<WalletOut>(`${V1}/wallet`, { movements }),
+  /** `movements`: kaç son hareket döneceği (1-100, varsayılan 20) — bayrak değil. */
+  get: (movements?: number) => http.get<WalletOut>(`${V1}/wallet`, { movements }),
   depositInfo: () => http.get<DepositInfoOut>(`${V1}/wallet/deposit-info`),
   buildPaymentTx: (payload: WalletPaymentIn) =>
     http.post<UnsignedTxOut>(`${V1}/wallet/tx/payment`, payload),

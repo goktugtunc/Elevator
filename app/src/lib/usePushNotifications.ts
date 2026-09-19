@@ -2,11 +2,7 @@ import { useRouter } from 'expo-router';
 import { useEffect, useRef } from 'react';
 
 import { notificationRoute } from '@/lib/notificationRoute';
-import {
-  addNotificationListeners,
-  getInitialNotificationResponse,
-  registerForPush,
-} from '@/lib/push';
+import { addNotificationListeners, getInitialNotificationData, registerForPush } from '@/lib/push';
 import { useSession } from '@/store/session';
 
 /**
@@ -42,16 +38,12 @@ export function usePushNotifications(): void {
       if (target) router.push(target);
     };
 
-    const remove = addNotificationListeners((response) => {
-      open(response.notification.request.content.data as Record<string, unknown> | undefined);
-    });
+    const remove = addNotificationListeners(open);
 
     // Uygulama bildirimden açıldıysa ilk yanıtı da karşıla.
     let cancelled = false;
-    void getInitialNotificationResponse().then((response) => {
-      if (!cancelled && response) {
-        open(response.notification.request.content.data as Record<string, unknown> | undefined);
-      }
+    void getInitialNotificationData().then((data) => {
+      if (!cancelled && data) open(data);
     });
 
     return () => {
