@@ -6,8 +6,9 @@ import { StyleSheet, View } from 'react-native';
 import { AsyncBoundary, EmptyState, Screen, TopBar } from '@/components/layout';
 import { Button, Card, Chip, ListRow, Text } from '@/components/ui';
 import { notificationsApi } from '@/lib/api';
-import type { NotificationCategory, NotificationOut } from '@/lib/api/types';
+import type { NotificationCategory, NotificationOut, UserRole } from '@/lib/api/types';
 import { formatRelative } from '@/lib/format';
+import { useSession } from '@/store/session';
 import { colors, radius, spacing } from '@/theme';
 
 const CATEGORIES: { value: NotificationCategory | 'all'; label: string }[] = [
@@ -26,6 +27,7 @@ const CATEGORIES: { value: NotificationCategory | 'all'; label: string }[] = [
 export default function Notifications() {
   const router = useRouter();
   const qc = useQueryClient();
+  const role = useSession((s) => s.role);
   const [category, setCategory] = useState<NotificationCategory | 'all'>('all');
 
   const list = useQuery({
@@ -58,7 +60,7 @@ export default function Notifications() {
 
   const open = (n: NotificationOut) => {
     if (!n.read_at) markOne.mutate(n.id);
-    const target = routeFor(n);
+    const target = routeFor(n, role);
     if (target) router.push(target);
   };
 
@@ -114,7 +116,7 @@ export default function Notifications() {
                           title={n.title}
                           subtitle={n.body}
                           meta={formatRelative(n.created_at)}
-                          chevron={Boolean(routeFor(n))}
+                          chevron={Boolean(routeFor(n, role))}
                           onPress={() => open(n)}
                         />
                       </View>
@@ -130,18 +132,38 @@ export default function Notifications() {
   );
 }
 
-/** Bildirimin `data` alanındaki kimliklerden hedef ekranı çıkarır. */
-function routeFor(n: NotificationOut): Href | null {
+/**
+ * Bildirimin hedef ekranı.
+ *
+ * Önce `data` içindeki kimliklere bakılır (en kesin hedef), yoksa `category`
+ * yedeğe düşer. Yalnızca kimliklere bakmak yetmiyordu: sunucu bazı olaylarda
+ * yönlendirilebilir bir kimlik taşımıyor (teklif geri çekildi → yalnız
+ * `offer_id`, yeni takipçi → `follower_id`, anchor durumu →
+ * `anchor_transaction_id`) ve o bildirimlere dokunmak hiçbir şey yapmıyordu.
+ */
+function routeFor(n: NotificationOut, role: UserRole | null): Href | null {
   const data = n.data ?? {};
-  const agreementId = data.agreement_id;
-  const listingId = data.listing_id;
-  const conversationId = data.conversation_id;
-  const traderId = data.trader_id;
-  if (typeof agreementId === 'string') return `/contract/${agreementId}` as Href;
-  if (typeof conversationId === 'string') return `/messages/${conversationId}` as Href;
-  if (typeof listingId === 'string') return `/listing/${listingId}` as Href;
-  if (typeof traderId === 'string') return `/trader/${traderId}` as Href;
-  return null;
+  const str = (v: unknown): string | null => (typeof v === 'string' && v ? v : null);
+
+  const agreementId = str(data.agreement_id);
+  if (agreementId) return `/contract/${agreementId}` as Href;
+  const conversationId = str(data.conversation_id);
+  if (conversationId) return `/messages/${conversationId}` as Href;
+  const listingId = str(data.listing_id);
+  if (listingId) return `/listing/${listingId}` as Href;
+  const traderId = str(data.trader_id);
+  if (traderId) return `/trader/${traderId}` as Href;
+
+  // Kimlik yok: kategoriye göre en yakın ekran. İlanlarım rol'e göre ayrışıyor.
+  switch (n.category) {
+    case 'wallet':
+      return '/wallet' as Href;
+    case 'offer':
+    case 'listing':
+      return role === 'trader' ? ('/(trader)/listings' as Href) : ('/(customer)/listings' as Href);
+    default:
+      return null;
+  }
 }
 
 /** Figma'daki "Bugün / Dün / tarih" grupları. */
