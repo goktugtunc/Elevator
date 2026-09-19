@@ -24,12 +24,15 @@ interface SessionState {
   profile: UserProfile | null;
   /** JWT'nin bitiş anı (ms epoch); sunucu bildirmediyse null. */
   expiresAt: number | null;
+  /** Mobilde WalletConnect eşleşme URI'si — UI QR/deep link gösterir. */
+  pairingUri: string | null;
   onboardingSeen: boolean;
   error: string | null;
 
   hydrate: () => Promise<void>;
   markOnboardingSeen: () => Promise<void>;
   connectWallet: () => Promise<string>;
+  cancelPairing: () => void;
   signIn: () => Promise<void>;
   /** Kayıt: rol + form → backend; başarılıysa profile/rol set edilir. */
   register: (payload: RegisterPayload) => Promise<void>;
@@ -60,6 +63,7 @@ export const useSession = create<SessionState>((set, get) => ({
   role: null,
   profile: null,
   expiresAt: null,
+  pairingUri: null,
   onboardingSeen: false,
   error: null,
 
@@ -84,7 +88,7 @@ export const useSession = create<SessionState>((set, get) => ({
         status: 'signed_out',
         onboardingSeen,
         address: persisted.address,
-        error: 'Oturum süresi doldu. Cüzdanınla tekrar giriş yap.',
+        error: 'Your session expired. Sign in again with your wallet.',
       });
       return;
     }
@@ -110,10 +114,21 @@ export const useSession = create<SessionState>((set, get) => ({
   },
 
   async connectWallet() {
-    set({ error: null });
-    const { address } = await wallet.connect();
-    set({ address, status: 'wallet_connected' });
-    return address;
+    set({ error: null, pairingUri: null });
+    try {
+      const { address } = await wallet.connect({
+        onUri: (uri) => set({ pairingUri: uri }),
+      });
+      set({ address, status: 'wallet_connected', pairingUri: null });
+      return address;
+    } catch (err) {
+      set({ pairingUri: null });
+      throw err;
+    }
+  },
+
+  cancelPairing() {
+    set({ pairingUri: null });
   },
 
   async signIn() {
@@ -148,6 +163,7 @@ export const useSession = create<SessionState>((set, get) => ({
       role: null,
       profile: null,
       expiresAt: null,
+      pairingUri: null,
       error: null,
     });
   },
@@ -195,7 +211,7 @@ registerAuthBridge({
       role: null,
       profile: null,
       expiresAt: null,
-      error: 'Oturum süresi doldu. Cüzdanınla tekrar giriş yap.',
+      error: 'Your session expired. Sign in again with your wallet.',
     });
   },
 });

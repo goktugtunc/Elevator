@@ -4,7 +4,7 @@ import { Tabs } from 'expo-router/js-tabs';
 import { TabBar } from '@/components/layout';
 import { useSession } from '@/store/session';
 
-/** Figma "Tab Bar/Trader": Panel · İşlemler · Keşfet · İlanlarım · Profil */
+/** Figma "Tab Bar/Trader": Dashboard · Trades · Discover · Listings · Profile */
 export default function TraderLayout() {
   const { status, role } = useSession();
   if (status !== 'signed_in') return <Redirect href="/(auth)/login" />;
@@ -12,11 +12,11 @@ export default function TraderLayout() {
 
   return (
     <Tabs tabBar={(props) => <TabBar {...props} />} screenOptions={{ headerShown: false }}>
-      <Tabs.Screen name="panel" />
-      <Tabs.Screen name="islemler" />
-      <Tabs.Screen name="kesfet" />
-      <Tabs.Screen name="ilanlarim" />
-      <Tabs.Screen name="profil" />
+      <Tabs.Screen name="dashboard" />
+      <Tabs.Screen name="trades" />
+      <Tabs.Screen name="discover" />
+      <Tabs.Screen name="listings" />
+      <Tabs.Screen name="profile" />
     </Tabs>
   );
 }

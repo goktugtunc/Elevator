@@ -19,18 +19,18 @@ import { colors, layout, radius, spacing } from '@/theme';
 const SLIDES: { icon: LucideIcon; title: string; body: string }[] = [
   {
     icon: Compass,
-    title: 'Trader’ları Keşfet',
-    body: 'Kaydırarak trader’ları incele; sana uygun olanla eşleş. Trader’sın ise yatırımcı ilanlarını keşfet.',
+    title: 'Discover traders',
+    body: 'Swipe through traders and match with the right one. If you are a trader, browse investor listings instead.',
   },
   {
     icon: ShieldCheck,
-    title: 'Güvenli Sözleşme',
-    body: 'Komisyon oranı, süre ve risk limitleri sözleşmeyle güvence altında — sermayen her zaman senin cüzdanında.',
+    title: 'Contracts you can trust',
+    body: 'Commission, duration and risk limits are locked into the contract — your capital stays in your own wallet.',
   },
   {
     icon: TrendingUp,
-    title: 'Hareketleri Takip Et',
-    body: 'Trader’ın işlemlerini, ilanlarına gelen etkileşimleri ve bildirimleri canlı izle.',
+    title: 'Follow every move',
+    body: 'Watch your trader’s positions, listing interactions and notifications in real time.',
   },
 ];
 
@@ -89,15 +89,15 @@ export default function Onboarding() {
       <View style={styles.actions}>
         {index < SLIDES.length - 1 ? (
           <>
-            <Button title="Geç" variant="ghost" onPress={finish} />
+            <Button title="Skip" variant="ghost" onPress={finish} />
             <Button
-              title="Devam"
+              title="Next"
               onPress={() => listRef.current?.scrollToIndex({ index: index + 1, animated: true })}
               style={{ flex: 1 }}
             />
           </>
         ) : (
-          <Button title="Başla" onPress={finish} fullWidth style={{ flex: 1 }} />
+          <Button title="Get started" onPress={finish} fullWidth style={{ flex: 1 }} />
         )}
       </View>
     </Screen>

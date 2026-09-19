@@ -5,6 +5,7 @@ import { ActivityIndicator, Platform, StyleSheet, View } from 'react-native';
 
 import { Screen } from '@/components/layout';
 import { Button, Card, Pill, Text } from '@/components/ui';
+import { WalletConnectSheet } from '@/components/wallet';
 import { metaApi } from '@/lib/api';
 import { networkLabel, userMessage } from '@/lib/errors';
 import { stellarConfig } from '@/lib/stellar';
@@ -15,7 +16,7 @@ import { colors, radius, spacing } from '@/theme';
 /**
  * Figma 1d · Giriş · Cüzdan ile (node 19:109)
  * Tasarımdaki MetaMask/Coinbase/Trust listesi Stellar'a uyarlandı (notlar §4.2):
- * web'de Stellar Wallets Kit modalı (Freighter, xBull, Albedo, Lobstr…), mobilde WalletConnect (sprint).
+ * web'de Stellar Wallets Kit modalı, mobilde WalletConnect v2 (FE-13).
  *
  * FE-04: SEP-10 hataları (yanlış ağ, reddedilen imza, sunucuya ulaşılamadı) ve
  * oturum süresi dolduğunda store'dan gelen uyarı burada gösterilir.
@@ -25,6 +26,8 @@ export default function Login() {
   const signIn = useSession((s) => s.signIn);
   const sessionError = useSession((s) => s.error);
   const clearError = useSession((s) => s.clearError);
+  const pairingUri = useSession((s) => s.pairingUri);
+  const cancelPairing = useSession((s) => s.cancelPairing);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -54,6 +57,8 @@ export default function Login() {
   };
 
   const notice = error ?? sessionError;
+  const connectLabel =
+    Platform.OS === 'web' ? 'Connect wallet (Freighter, xBull, Albedo…)' : 'Connect wallet';
 
   return (
     <Screen contentStyle={styles.content}>
@@ -62,60 +67,55 @@ export default function Login() {
           TK
         </Text>
       </View>
-      <Text variant="display">Hoş geldin</Text>
+      <Text variant="display">Welcome</Text>
       <Text variant="body" color="text2">
-        Devam etmek için cüzdanını bağla
+        Connect your Stellar wallet to continue
       </Text>
       <View style={styles.status}>
-        <Pill label={`Ağ: ${networkLabel()}`} tone="navy" />
+        <Pill label={`Network: ${networkLabel()}`} tone="navy" />
         {backend.isPending ? (
           <View style={styles.statusRow}>
             <ActivityIndicator size="small" color={colors.text3} />
             <Text variant="caption" color="text3">
-              Sunucu kontrol ediliyor…
+              Checking the server…
             </Text>
           </View>
         ) : backend.isError ? (
           <Text variant="caption" color="loss">
-            Sunucuya ulaşılamıyor — giriş şu an yapılamayabilir.
+            Server unreachable — signing in may not work right now.
           </Text>
         ) : networkMismatch ? (
           <Text variant="caption" color="loss">
-            Sunucu {backend.data.network} ağında, uygulama {networkLabel()} ağında.
+            Server is on {backend.data.network}, the app is on {networkLabel()}.
           </Text>
         ) : (
           <Text variant="caption" color={colors.profit}>
-            Sunucu bağlı · {backend.data?.home_domain}
+            Server connected · {backend.data?.home_domain}
           </Text>
         )}
       </View>
 
       <Card style={styles.card}>
         {wallet.available ? (
-          <Button
-            title="Cüzdan Bağla (Freighter, xBull, Albedo…)"
-            onPress={onConnect}
-            loading={busy}
-            fullWidth
-          />
+          <Button title={connectLabel} onPress={onConnect} loading={busy} fullWidth />
         ) : (
           <>
-            <Text variant="bodyStrong">Mobil cüzdan bağlantısı hazırlanıyor</Text>
+            <Text variant="bodyStrong">Wallet connection needs setup</Text>
             <Text variant="caption" color="text2">
-              Freighter mobile + WalletConnect prototipi sprint kapsamında. Şimdilik web sürümünü
-              kullanın.
+              Mobile sign-in uses WalletConnect. Add EXPO_PUBLIC_WALLETCONNECT_PROJECT_ID to your
+              .env file (free project ID at cloud.reown.com) and restart the app.
             </Text>
           </>
         )}
-        {Platform.OS === 'web' ? (
-          <Text variant="caption" color="text3">
-            Freighter yüklü değilse: freighter.app · Cüzdanı {networkLabel()} ağına almayı unutma.
-          </Text>
-        ) : null}
+        <Text variant="caption" color="text3">
+          {Platform.OS === 'web'
+            ? `No Freighter yet? Get it at freighter.app — and switch it to ${networkLabel()}.`
+            : `Works with Lobstr and xBull. Switch your wallet to ${networkLabel()} first.`}
+        </Text>
       </Card>
 
       <Text variant="caption" color="text2" align="center">
-        Giriş için cüzdanından bir SEP-10 imza isteği onaylarsın. Bu işlem için ücret alınmaz.
+        Signing in asks your wallet to sign a SEP-10 challenge. It is free and moves no funds.
       </Text>
 
       {notice ? (
@@ -128,15 +128,17 @@ export default function Login() {
 
       <View style={styles.footer}>
         <Text variant="body" color="text2">
-          Hesabın yok mu?
+          No account yet?
         </Text>
         <Button
-          title="Kayıt Ol"
+          title="Sign up"
           variant="ghost"
           size="sm"
           onPress={() => router.push('/(auth)/register/role')}
         />
       </View>
+
+      <WalletConnectSheet uri={pairingUri} onClose={cancelPairing} />
     </Screen>
   );
 }

@@ -9,28 +9,28 @@ export type Role = 'customer' | 'trader';
 export type RiskLevel = 'low' | 'mid' | 'high';
 
 export const RISK_LABEL: Record<RiskLevel, string> = {
-  low: 'Muhafazakâr',
-  mid: 'Dengeli',
-  high: 'Agresif',
+  low: 'Conservative',
+  mid: 'Balanced',
+  high: 'Aggressive',
 };
 
 export const RISK_LEVELS: RiskLevel[] = ['low', 'mid', 'high'];
 
-/** Figma "Status Chip" — status=Teklif | Onay Bekliyor | Aktif | Tamamlandı | İptal */
+/** Figma "Status Chip" — Teklif | Onay Bekliyor | Aktif | Tamamlandı | İptal (arayüz metni İngilizce) */
 export type ContractStatus = 'offer' | 'pending' | 'active' | 'completed' | 'cancelled';
 
 export const STATUS_LABEL: Record<ContractStatus, string> = {
-  offer: 'Teklif',
-  pending: 'Onay Bekliyor',
-  active: 'Aktif',
-  completed: 'Tamamlandı',
-  cancelled: 'İptal',
+  offer: 'Offer',
+  pending: 'Awaiting approval',
+  active: 'Active',
+  completed: 'Completed',
+  cancelled: 'Cancelled',
 };
 
-export type Market = 'BIST Hisse' | 'Kripto' | 'Forex' | 'Vadeli' | 'Emtia';
+export type Market = 'BIST Equities' | 'Crypto' | 'Forex' | 'Futures' | 'Commodities';
 
 /** Figma'daki piyasa chip'lerinin sırası (Kayıt, İlan Oluştur, Keşfet filtreleri). */
-export const MARKETS: Market[] = ['BIST Hisse', 'Kripto', 'Forex', 'Vadeli', 'Emtia'];
+export const MARKETS: Market[] = ['BIST Equities', 'Crypto', 'Forex', 'Futures', 'Commodities'];
 
 export interface UserProfile {
   address: string; // Stellar public key (G...)
@@ -141,7 +141,7 @@ export interface Trade {
   symbol: string; // THYAO, EUR/USD
   side: TradeSide;
   quantity: number;
-  unit: 'adet' | 'lot' | 'kontrat';
+  unit: 'shares' | 'lots' | 'contracts';
   entryPrice: number;
   currentPrice?: number;
   pnlPct?: number;

@@ -21,16 +21,26 @@
 - Sunucu `testnet`, passphrase `Test SDF Network ; September 2015` — Giriş ekranı bunu istemci ayarıyla karşılaştırıp uyuşmazlığı gösterir.
 - Hata gövdesi `{code, message, details}` → `ApiError.code` alanına taşınır.
 
+## Dil ve rotalar
+
+- **Uygulama arayüzü İngilizce** (19 Eyl kararı). Ekran metinleri, hata mesajları, etiketler (`RISK_LABEL`, `STATUS_LABEL`, `MARKETS`) ve sayı/tarih biçimi (`en-US`) İngilizce; para birimi `TRY` olarak kalır.
+- **Belgeler ve kod yorumları Türkçe** kalır (bu dosya, `README.md`, `docs/`).
+- **Rotalar İngilizceye taşındı** (web URL'leri de arayüzün parçası):
+  `panel→dashboard`, `hareketler→activity`, `islemler→trades`, `kesfet→discover`, `ilanlarim→listings`, `profil→profile`, `mesajlar→messages`, `sozlesme→contract`, `ilan→listing` (`olustur→create`), `bildirimler→notifications`, `cuzdan→wallet`.
+- Sayı girişi artık İngilizce yazım: virgül binlik, nokta ondalık (`parseNumberInput`).
+
 ## Kurulum durumu (hazır)
 
 - [x] Expo SDK 57 + TypeScript + expo-router (typed routes), Inter fontları, ESLint/Prettier
 - [x] Tema token'ları Figma DS ile birebir (`src/theme`) — bkz. `docs/design-system.md`
 - [x] UI kütüphanesi: Button, Chip, Pill, RiskBadge, StatusChip, KpiBox/Stat, Avatar, Segmented, Field, ListRow, Card, **Sparkline, BottomSheet, Switch, Progress**; layout: Screen, TopBar/ScreenHeader, TabBar (rol bazlı), RiskStrip, Placeholder
 - [x] Navigasyon iskeleti: `(auth)` → rol bazlı `(customer)` / `(trader)` tab grupları + paylaşılan stack ekranları; `app/index.tsx` oturuma göre yönlendirir
-- [x] Cüzdan adaptörü: web = Stellar Wallets Kit v2 (modal çalışıyor), native = stub (FE-13)
+- [x] Cüzdan adaptörü: web = Stellar Wallets Kit v2, **native = WalletConnect v2 `UniversalProvider`** (QR + Lobstr/xBull deep link sheet)
+- [x] **Expo Go uyumu:** özel native modül yok; rastgelelik `expo-crypto` ile (eski `react-native-get-random-values` kaldırıldı), pano `expo-clipboard`, QR `react-native-qrcode-svg` (react-native-svg üzerinden)
 - [x] `@stellar/stellar-sdk` 17 (RPC/Horizon istemcileri, polyfill'ler), SEP-10 giriş akışı (`lib/auth/`), oturum store'u (zustand + SecureStore/localStorage)
 - [x] API istemcisi + tüm endpoint'ler tiplenmiş (`lib/api/endpoints.ts`), gerçek backend'e bağlı `.env`
 - [x] `npm run typecheck`, `npm run lint`, `npx prettier --check`, `npm run export:web` temiz geçiyor
+- [x] iOS ve Android paketleri Metro'da hatasız derleniyor (`/node_modules/expo-router/entry.bundle?platform=ios|android`)
 
 ## Definition of Done (her ekran görevi için)
 
@@ -59,7 +69,7 @@
 | FE-10 | Panel · Müşteri (portföy KPI + sparkline, takip listesi, ilan etkileşimleri) | 30:97 | M | BE-03, BE-07 | | ⬜ |
 | FE-11 | Panel · Trader (profil tamamlama, bekleyen teklifler, aktif yatırımcılar) | 23:362 | M | BE-03, BE-07 | | ⬜ |
 | FE-12 | Hareketler · birleşik akış + trader bazlı görünüm + "Görünümü Düzenle" sheet | 30:252 · 30:375 · 30:536 | M | BE-08 | | ⬜ |
-| FE-13 | **Mobil cüzdan prototipi (timebox 1 gün):** Freighter mobile + WalletConnect v2 `UniversalProvider`, deep link dönüşü; başarısızsa web-only karar verilir | — | M | `EXPO_PUBLIC_WALLETCONNECT_PROJECT_ID` | | ⬜ |
+| FE-13 | Mobil cüzdan: WalletConnect v2 `UniversalProvider` + QR/deep link sheet, Expo Go uyumlu polyfill'ler | — | M | `EXPO_PUBLIC_WALLETCONNECT_PROJECT_ID` | Claude | 🟡 |
 | FE-14 | İşlemler · Trader (K/Z başlığı, açık/geçmiş) + "Yeni İşlem" sheet → `tradesApi.create` | 23:45 · 23:181 | M | BE-08 | | ⬜ |
 | FE-15 | İlanlarım (iki rol) + İlan Detayı (teklifler/talepler/ilgi sekmeleri) | 26:58 · 26:203 · 26:345 · 26:462 | M | BE-03 | | ⬜ |
 | FE-16 | İlan Oluştur sihirbazı (4 adım; risk profili adımı Figma'da) → `listingsApi.create` + zincir üstü ilan kaydı | 28:106 | M | BE-05 | | ⬜ |
@@ -83,10 +93,14 @@ Backend beklemeden ilerletilebilecek işler: **FE-12 / FE-14** (FE-07 bileşenle
 | `FE-05 + FE-20` | `SwipeDeck`, `ServiceListingCard`, `Sparkline`; Keşfet · Müşteri `GET /listings?kind=service`'e bağlı |
 | `FE-06 + FE-07` | `BottomSheet`, `Switch`, `Progress`; `CapitalListingCard`, `OfferSheet`; Keşfet · Trader `GET /listings?kind=capital` + `POST /listings/:id/offers`; API `/api/v1` önekine taşındı, Giriş'e sunucu durumu göstergesi |
 
+**FE-13 notu (🟡):** `src/lib/wallet/wallet.ts` artık WalletConnect v2 `UniversalProvider` kullanıyor: CAIP-2 zinciri `stellar:testnet`, yöntemler `stellar_signXDR` / `stellar_signAndSubmitXDR`. `connect()` eşleşme URI'sini store'a (`pairingUri`) veriyor, `WalletConnectSheet` QR + "Open in Lobstr/xBull" + bağlantıyı kopyala gösteriyor. Oturum WalletConnect'in AsyncStorage deposunda kalıcı. **Çalışması için `EXPO_PUBLIC_WALLETCONNECT_PROJECT_ID` gerekli** (ücretsiz: cloud.reown.com); yoksa giriş ekranı kurulum mesajı gösteriyor.
+
 **Açık kalanlar**
 
 - 🟡 görevlerin uçtan uca doğrulaması ilgili BE-* ucu açılınca yapılacak; şu an ekranlar 404'ü hata durumu olarak gösteriyor (sahte veri yok).
 - **DoD-3 (Chrome 390px elle kontrol) hiçbir ekran için yapılmadı** — `cd app && npm run web`.
+- **Mobil cüzdan gerçek cihazda denenmedi.** Bu makinede Xcode/Android SDK kurulu olmadığı için simülatör açılamadı; ayrıca simülatörde cüzdan uygulaması olmadığından deep link zaten çalışmaz. Doğru test: `npx expo start` → QR'ı **Expo Go** ile telefonda aç → Lobstr/xBull yüklü cihazda "Connect wallet".
+- WalletConnect proje kimliği `.env`'de boş; doldurulmadan mobil giriş başlamaz.
 - Keşfet aksiyonları için önerilen uçlar: `POST /listings/:id/requests` (müşteri teklif ister), `POST /listings/:id/offers` (trader teklif verir), `POST /listings/:id/saves` (trader kaydeder). Backend farklı isimlendirirse `endpoints.ts` güncellenir.
 - `Listing.owner` özeti (ad, baş harf, rating, 12 ay getiri, drawdown, sparkline, etiketler) `/listings` yanıtında gömülü bekleniyor; gelmezse kartta yalnızca cüzdan adresi görünür.
 
@@ -108,7 +122,8 @@ Backend beklemeden ilerletilebilecek işler: **FE-12 / FE-14** (FE-07 bileşenle
 
 ## Riskler ve kararlar
 
-- **Mobil cüzdan (FE-13):** RN/Expo'dan Freighter'a WalletConnect bağlantısı belgelenmemiş; 1 günlük timebox, başarısızsa mobil teslim cüzdansız ekranlarla sınırlı, birincil hedef web. Yedekler: Blux, Privy, Dfns.
+- **Mobil cüzdan (FE-13):** Freighter mobile'ın WalletConnect desteği belgelenmemiş olduğundan hedef cüzdanlar **Lobstr ve xBull** (WalletConnect v2 destekleyen Stellar cüzdanları). Gerçek cihaz testi yapılmadan "çalışıyor" denemez. Yedekler: Blux, Privy, Dfns.
+- **Expo Go kısıtı:** Expo Go yalnızca kendi içine gömülü native modülleri çalıştırır. Yeni bir native bağımlılık eklenirse (ör. `react-native-quick-crypto`) Expo Go kırılır ve development build gerekir. Şu an tüm bağımlılıklar Expo Go uyumlu.
 - **Stellar Wallets Kit npm paketi** (`@creit.tech/stellar-wallets-kit` 2.6) kullanılıyor; bakımcılar npm güncellemelerini durdurabilir → gerekirse `npx jsr add @creit-tech/stellar-wallets-kit`'e geçiş (import yolları aynı).
 - **SEP-10'da yenileme token'ı yok:** süresi dolan JWT için challenge yeniden imzalatılır, yani yenileme cüzdanda imza isteği açar. Sunucu `expiresAt` vermezse JWT `exp` claim'i kullanılır.
 - **TRY anchor Testnet'te yok** ise Testnet anchor ile aynı SEP-24 akışı TRY etiketiyle sunulur (§3.3). Mentörlere sorulacak.

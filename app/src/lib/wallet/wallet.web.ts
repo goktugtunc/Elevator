@@ -9,7 +9,7 @@ import { StellarWalletsKit } from '@creit.tech/stellar-wallets-kit/sdk';
 import { defaultModules } from '@creit.tech/stellar-wallets-kit/modules/utils';
 import { Networks as KitNetworks } from '@creit.tech/stellar-wallets-kit/types';
 
-import { WalletError, type WalletAdapter } from './types';
+import { WalletError, type ConnectOptions, type WalletAdapter } from './types';
 import { stellarConfig } from '@/lib/stellar/config';
 
 let initialized = false;
@@ -26,16 +26,20 @@ function ensureInit() {
 function mapError(err: unknown): WalletError {
   const msg = err instanceof Error ? err.message : String(err);
   if (/reject|denied|cancel/i.test(msg))
-    return new WalletError('İmza isteği reddedildi.', 'USER_REJECTED');
+    return new WalletError('The request was rejected in your wallet.', 'USER_REJECTED');
   if (/network/i.test(msg))
-    return new WalletError('Cüzdan yanlış ağda. Testnet seçin.', 'WRONG_NETWORK');
-  return new WalletError(msg || 'Cüzdan hatası', 'UNKNOWN');
+    return new WalletError(
+      `Your wallet is on a different network. Switch it to ${stellarConfig.network === 'mainnet' ? 'Mainnet' : 'Testnet'}.`,
+      'WRONG_NETWORK',
+    );
+  return new WalletError(msg || 'Wallet error', 'UNKNOWN');
 }
 
 export const wallet: WalletAdapter = {
   available: true,
 
-  async connect() {
+  // Web'de cüzdan seçimini Kit'in kendi modalı yapar; ConnectOptions kullanılmaz.
+  async connect(_options?: ConnectOptions) {
     ensureInit();
     try {
       const { address } = await StellarWalletsKit.authModal();

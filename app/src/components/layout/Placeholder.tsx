@@ -23,7 +23,7 @@ export function Placeholder({
     <View style={styles.wrap}>
       <Card>
         <Text variant="overline" color="text3">
-          Geliştirilecek ekran
+          Screen in progress
         </Text>
         <Text variant="h2" style={{ marginTop: spacing.xs }}>
           {screen}

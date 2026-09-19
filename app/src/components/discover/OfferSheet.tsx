@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { BottomSheet, Button, Field, Text } from '@/components/ui';
-import { parseTRNumber } from '@/lib/format';
+import { parseNumberInput } from '@/lib/format';
 import { colors, radius, spacing } from '@/theme';
 import type { Listing } from '@/types';
 
@@ -44,15 +44,15 @@ export function OfferSheet({
 
   const submit = () => {
     const next: Record<string, string> = {};
-    const commissionPct = parseTRNumber(commission);
+    const commissionPct = parseNumberInput(commission);
     if (commissionPct === null || commissionPct <= 0 || commissionPct > 50)
-      next.commission = '%0 ile %50 arasında bir oran gir.';
-    const min = parseTRNumber(returnMin);
-    const max = parseTRNumber(returnMax);
-    if (min === null) next.returnMin = 'Alt sınırı gir.';
-    if (max === null) next.returnMax = 'Üst sınırı gir.';
+      next.commission = 'Enter a rate between 0% and 50%.';
+    const min = parseNumberInput(returnMin);
+    const max = parseNumberInput(returnMax);
+    if (min === null) next.returnMin = 'Enter the lower bound.';
+    if (max === null) next.returnMax = 'Enter the upper bound.';
     if (min !== null && max !== null && min > max)
-      next.returnMax = 'Üst sınır alt sınırdan küçük olamaz.';
+      next.returnMax = 'The upper bound cannot be below the lower bound.';
     setErrors(next);
     if (Object.keys(next).length > 0) return;
 
@@ -67,25 +67,25 @@ export function OfferSheet({
     <BottomSheet
       visible={visible}
       onClose={onClose}
-      title="Teklif Ver"
+      title="Make an offer"
       subtitle={listing?.title}
-      footer={<Button title="Teklifi Gönder" fullWidth loading={submitting} onPress={submit} />}
+      footer={<Button title="Send offer" fullWidth loading={submitting} onPress={submit} />}
     >
       <Field
-        label="Komisyon Oranı"
+        label="Commission rate"
         value={commission}
         onChangeText={setCommission}
         placeholder="20"
         keyboardType="decimal-pad"
         suffix="%"
         error={errors.commission}
-        hint="Kârdan alacağın pay; sözleşmeye bu oran yazılır."
+        hint="Your share of the profit — written into the contract."
       />
 
       <View style={styles.range}>
         <View style={styles.rangeItem}>
           <Field
-            label="Tahmini Getiri (alt)"
+            label="Expected return (low)"
             value={returnMin}
             onChangeText={setReturnMin}
             placeholder="15"
@@ -96,7 +96,7 @@ export function OfferSheet({
         </View>
         <View style={styles.rangeItem}>
           <Field
-            label="Tahmini Getiri (üst)"
+            label="Expected return (high)"
             value={returnMax}
             onChangeText={setReturnMax}
             placeholder="25"
@@ -108,13 +108,13 @@ export function OfferSheet({
       </View>
 
       <Field
-        label="Not"
+        label="Note"
         value={note}
         onChangeText={setNote}
-        placeholder="Stratejini ve risk yönetimini kısaca anlat."
+        placeholder="Briefly describe your strategy and risk management."
         multiline
         maxLength={280}
-        hint={`${note.trim().length}/280 · isteğe bağlı`}
+        hint={`${note.trim().length}/280 · optional`}
       />
 
       {error ? (
@@ -126,8 +126,8 @@ export function OfferSheet({
       ) : null}
 
       <Text variant="caption" color="text3">
-        Teklif kabul edilirse sözleşme ve escrow zincir üstünde oluşturulur; getiri taahhüdü
-        değildir, piyasa riski müşteriye aittir.
+        If the offer is accepted, the contract and escrow are created on-chain. This is not a
+        guaranteed return — market risk stays with the customer.
       </Text>
     </BottomSheet>
   );

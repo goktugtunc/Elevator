@@ -74,7 +74,7 @@ async function request<T>(method: Method, path: string, options: RequestOptions 
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
   } catch (err) {
-    throw new ApiError(0, err instanceof Error ? err.message : `${method} ${path} başarısız`);
+    throw new ApiError(0, err instanceof Error ? err.message : `${method} ${path} failed`);
   }
 
   const text = await res.text();

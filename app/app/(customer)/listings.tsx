@@ -1,14 +1,14 @@
 import { Placeholder, Screen, ScreenHeader } from '@/components/layout';
 
 /** Figma 6a İlanlarım · Müşteri (node 26:58) — sprint görevi için bkz. SPRINT-1.md */
-export default function CustomerIlanlarim() {
+export default function CustomerListings() {
   return (
     <Screen riskStrip={false} padded={false}>
-      <ScreenHeader title="İlanlarım" />
+      <ScreenHeader title="My Listings" />
       <Placeholder
-        screen="6a İlanlarım · Müşteri"
+        screen="6a My Listings · Customer"
         figmaNode="26:58"
-        notes="Aktif / Bekleyen / Kapalı segmented; İlan Kartı (sermaye ilanı, istatistikler, son etkileşimler). Detay → /ilan/[id] (26:345)."
+        notes="Active / Pending / Closed segmented; listing card (capital listing, stats, recent interactions). Detail goes to /listing/[id] (26:345)."
       />
     </Screen>
   );

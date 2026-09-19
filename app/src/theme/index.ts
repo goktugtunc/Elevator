@@ -6,4 +6,4 @@ export { spacing, radius, layout, shadow } from './spacing';
 
 /** Uygulama genelinde zorunlu yasal uyarı metni (her ekranın altındaki Risk Strip). */
 export const RISK_DISCLAIMER =
-  'Yatırım ve komisyon getirileri piyasa koşullarına bağlıdır, sermaye kaybı riski içerir.';
+  'Investment and commission returns depend on market conditions and carry the risk of capital loss.';

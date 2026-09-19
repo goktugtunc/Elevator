@@ -29,12 +29,22 @@ traderkirala/
 cd app
 cp .env.example .env      # backend URL'si hazır; kontrat ID'leri deploy sonrası
 npm install
-npm run web               # http://localhost:8081
+npm run web               # tarayıcı  → http://localhost:8081
+npm start                 # mobil     → QR'ı Expo Go ile okut
 ```
 
 Diğer komutlar: `npm run typecheck`, `npm run lint`, `npm run export:web` (statik build → `app/dist`).
 
-Cüzdan: web'de Stellar Wallets Kit (Freighter, xBull, Albedo, Lobstr…). Freighter'ı **Testnet**'e alın. Mobil cüzdan (WalletConnect) sprint kapsamında prototiplenecek.
+**Arayüz dili İngilizce**, belgeler ve kod yorumları Türkçe.
+
+### Cüzdan
+
+| Platform | Nasıl |
+|---|---|
+| Web | Stellar Wallets Kit — Freighter, xBull, Albedo, Lobstr… Cüzdanı **Testnet**'e alın. |
+| iOS / Android (Expo Go) | WalletConnect v2 — QR ya da Lobstr / xBull deep link'i. `EXPO_PUBLIC_WALLETCONNECT_PROJECT_ID` doldurulmalı (ücretsiz: [cloud.reown.com](https://cloud.reown.com)). |
+
+Uygulama Expo Go ile çalışır: özel native modül kullanılmaz (rastgelelik `expo-crypto`, pano `expo-clipboard`, QR `react-native-qrcode-svg`).
 
 ## Mimari
 

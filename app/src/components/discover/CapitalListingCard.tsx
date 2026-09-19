@@ -32,16 +32,16 @@ export function CapitalListingCard({ listing }: { listing: Listing }) {
 
       <View style={styles.pills}>
         <Pill label={listing.market} tone="navy" />
-        <Pill label={`${listing.durationMonths} ay`} />
+        <Pill label={`${listing.durationMonths} months`} />
         {listing.stats?.offers !== undefined ? (
-          <Pill label={`${listing.stats.offers} teklif`} />
+          <Pill label={`${listing.stats.offers} offers`} />
         ) : null}
       </View>
 
       {listing.capitalTRY !== undefined ? (
         <View style={styles.capital}>
           <Text variant="caption" color="text2">
-            Sermaye
+            Capital
           </Text>
           <Text variant="numeric">{formatTRY(listing.capitalTRY)}</Text>
         </View>
@@ -50,15 +50,15 @@ export function CapitalListingCard({ listing }: { listing: Listing }) {
       <View style={styles.stats}>
         {listing.expectedCommissionRange ? (
           <Stat
-            label="Beklenen Komisyon"
+            label="Expected commission"
             value={formatRateRange(listing.expectedCommissionRange)}
           />
         ) : null}
         {listing.maxLossPct !== undefined ? (
-          <Stat label="Maks. Kayıp" value={`%${listing.maxLossPct}`} />
+          <Stat label="Max loss" value={`${listing.maxLossPct}%`} />
         ) : null}
         {listing.stats?.interest !== undefined ? (
-          <Stat label="İlgi" value={String(listing.stats.interest)} />
+          <Stat label="Interest" value={String(listing.stats.interest)} />
         ) : null}
       </View>
 

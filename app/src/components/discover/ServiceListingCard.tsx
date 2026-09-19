@@ -34,7 +34,7 @@ export function ServiceListingCard({ listing }: { listing: Listing }) {
           {owner?.rating !== undefined ? (
             <View style={styles.rating}>
               <Star size={13} color={colors.amber} fill={colors.amber} />
-              <Text variant="captionStrong">{owner.rating.toFixed(1).replace('.', ',')}</Text>
+              <Text variant="captionStrong">{owner.rating.toFixed(1)}</Text>
               {owner.ratingCount !== undefined ? (
                 <Text variant="caption" color="text3">
                   ({owner.ratingCount})
@@ -48,9 +48,9 @@ export function ServiceListingCard({ listing }: { listing: Listing }) {
 
       <View style={styles.pills}>
         <Pill label={listing.market} tone="navy" />
-        <Pill label={`${listing.durationMonths} ay`} />
+        <Pill label={`${listing.durationMonths} months`} />
         {owner?.activeInvestors !== undefined ? (
-          <Pill label={`${owner.activeInvestors} yatırımcı`} />
+          <Pill label={`${owner.activeInvestors} investors`} />
         ) : null}
       </View>
 
@@ -58,7 +58,7 @@ export function ServiceListingCard({ listing }: { listing: Listing }) {
         <View style={styles.performance}>
           <View>
             <Text variant="caption" color="text2">
-              12 Ay Getiri
+              12-month return
             </Text>
             <Text variant="numeric" color={pnlColor(owner.return12mPct)}>
               {formatPnlPct(owner.return12mPct)}
@@ -73,16 +73,16 @@ export function ServiceListingCard({ listing }: { listing: Listing }) {
       <View style={styles.stats}>
         {owner?.maxDrawdownPct !== undefined ? (
           <Stat
-            label="Maks. Drawdown"
+            label="Max drawdown"
             value={formatPnlPct(owner.maxDrawdownPct)}
             signed={owner.maxDrawdownPct}
           />
         ) : null}
         {listing.commissionPct !== undefined ? (
-          <Stat label="Komisyon" value={formatRatePct(listing.commissionPct)} />
+          <Stat label="Commission" value={formatRatePct(listing.commissionPct)} />
         ) : null}
         {listing.minCapitalTRY !== undefined ? (
-          <Stat label="Min. Sermaye" value={formatTRY(listing.minCapitalTRY)} />
+          <Stat label="Min. capital" value={formatTRY(listing.minCapitalTRY)} />
         ) : null}
       </View>
 

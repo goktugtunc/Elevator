@@ -39,13 +39,13 @@ export default function TraderKesfet() {
       listingsApi.createOffer(listing.id, draft),
     onSuccess: () => {
       setOfferTarget(null);
-      setNotice({ tone: 'ok', text: 'Teklifin müşteriye iletildi.' });
+      setNotice({ tone: 'ok', text: 'Your offer was sent to the customer.' });
     },
   });
 
   const save = useMutation({
     mutationFn: (listing: Listing) => listingsApi.save(listing.id),
-    onSuccess: () => setNotice({ tone: 'ok', text: 'İlan kaydedildi.' }),
+    onSuccess: () => setNotice({ tone: 'ok', text: 'Listing saved.' }),
     onError: (err) => setNotice({ tone: 'error', text: userMessage(err) }),
   });
 
@@ -58,32 +58,32 @@ export default function TraderKesfet() {
 
   return (
     <Screen riskStrip={false} padded={false} scroll={false}>
-      <ScreenHeader title="Keşfet" subtitle="Sermaye ilanlarını incele, teklif ver" />
+      <ScreenHeader title="Discover" subtitle="Browse capital listings and make offers" />
 
       <View style={styles.body}>
         {listings.isPending ? (
           <View style={styles.center}>
             <ActivityIndicator color={colors.navy900} />
             <Text variant="caption" color="text2">
-              İlanlar yükleniyor…
+              Loading listings…
             </Text>
           </View>
         ) : listings.isError ? (
           <Card style={styles.state}>
-            <Text variant="h2">İlanlar alınamadı</Text>
+            <Text variant="h2">Could not load listings</Text>
             <Text variant="body" color="text2">
               {userMessage(listings.error)}
             </Text>
-            <Button title="Tekrar dene" onPress={() => listings.refetch()} />
+            <Button title="Try again" onPress={() => listings.refetch()} />
           </Card>
         ) : items.length === 0 ? (
           <Card style={styles.state}>
-            <Text variant="h2">Şimdilik ilan yok</Text>
+            <Text variant="h2">Nothing here yet</Text>
             <Text variant="body" color="text2">
-              Müşteriler sermaye ilanı oluşturduğunda burada görünecek. Hizmet ilanı yayınlarsan
-              müşteriler sana da teklif isteyebilir.
+              Capital listings from customers show up here. Publish a service listing and customers
+              can reach out to you too.
             </Text>
-            <Button title="Yenile" variant="secondary" onPress={() => listings.refetch()} />
+            <Button title="Refresh" variant="secondary" onPress={() => listings.refetch()} />
           </Card>
         ) : (
           <SwipeDeck<Listing>
@@ -94,15 +94,15 @@ export default function TraderKesfet() {
             renderCard={(l) => <CapitalListingCard listing={l} />}
             onSwipe={onSwipe}
             onTopChange={setTop}
-            rightLabel="TEKLİF VER"
+            rightLabel="OFFER"
             renderEmpty={() => (
               <Card style={styles.state}>
-                <Text variant="h2">Bugünlük bu kadar</Text>
+                <Text variant="h2">That’s everyone for now</Text>
                 <Text variant="body" color="text2">
-                  Tüm ilanları gördün. Yeni ilanlar için listeyi yenileyebilirsin.
+                  You have seen every listing. Refresh to check for new ones.
                 </Text>
                 <Button
-                  title="Baştan bak"
+                  title="Start over"
                   variant="secondary"
                   leftIcon={<RotateCcw size={16} color={colors.navy900} />}
                   onPress={() => {
@@ -126,7 +126,7 @@ export default function TraderKesfet() {
         {items.length > 0 ? (
           <View style={styles.actions}>
             <ActionButton
-              label="Geç"
+              label="Skip"
               onPress={() => deckRef.current?.swipe('left')}
               disabled={!top}
               tint={colors.loss}
@@ -134,7 +134,7 @@ export default function TraderKesfet() {
               <X size={22} color={colors.loss} />
             </ActionButton>
             <ActionButton
-              label="Kaydet"
+              label="Save"
               onPress={() => top && save.mutate(top)}
               disabled={!top || save.isPending}
               tint={colors.navy900}
@@ -142,7 +142,7 @@ export default function TraderKesfet() {
               <Bookmark size={20} color={colors.navy900} />
             </ActionButton>
             <ActionButton
-              label="Teklif Ver"
+              label="Make offer"
               onPress={() => deckRef.current?.swipe('right')}
               disabled={!top}
               tint={colors.profit}

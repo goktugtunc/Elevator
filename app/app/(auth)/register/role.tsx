@@ -18,23 +18,23 @@ const ROLES: {
 }[] = [
   {
     role: 'customer',
-    title: 'Müşteri',
-    summary: 'Sermayeni yönetmesi için bir trader’a emanet et.',
+    title: 'Customer',
+    summary: 'Hand your capital to a trader you choose.',
     bullets: [
-      'Trader ilanlarını kaydırarak keşfet',
-      'Trader’ın hareketlerini canlı takip et',
-      'Sermaye ilanı oluştur',
+      'Swipe through trader listings',
+      'Follow your trader’s moves live',
+      'Publish a capital listing',
     ],
     Icon: Wallet,
   },
   {
     role: 'trader',
     title: 'Trader',
-    summary: 'Yatırımcı sermayesiyle işlem yap, komisyon kazan.',
+    summary: 'Trade with investor capital and earn commission.',
     bullets: [
-      'Müşteri ilanlarını kaydırarak keşfet',
-      'İşlemlerini yatırımcılarla paylaş',
-      'Hizmet ilanı yayınla',
+      'Swipe through customer listings',
+      'Share your trades with investors',
+      'Publish a service listing',
     ],
     Icon: Briefcase,
   },
@@ -46,13 +46,13 @@ export default function RegisterRole() {
 
   return (
     <Screen padded={false}>
-      <TopBar title="Kayıt Ol" />
+      <TopBar title="Sign up" />
       <View style={styles.body}>
-        <Progress value={0.5} label="Adım 1/2 · Rol Seçimi" />
+        <Progress value={0.5} label="Step 1 of 2 · Choose your role" />
 
-        <Text variant="h1">Hesabını nasıl kullanacaksın?</Text>
+        <Text variant="h1">How will you use TraderKirala?</Text>
         <Text variant="body" color="text2">
-          Rolünü şimdi seç. Bu seçime göre arayüzün ve menün şekillenir.
+          Pick your role now — it shapes your navigation and the screens you see.
         </Text>
 
         {ROLES.map(({ role, title, summary, bullets, Icon }) => {
@@ -90,7 +90,7 @@ export default function RegisterRole() {
         })}
 
         <Button
-          title="Devam"
+          title="Continue"
           disabled={!selected}
           fullWidth
           onPress={() =>

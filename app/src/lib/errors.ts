@@ -12,26 +12,27 @@ export function userMessage(err: unknown): string {
   if (err instanceof WalletError) {
     switch (err.code) {
       case 'USER_REJECTED':
-        return 'İmza isteği cüzdanda reddedildi. Girişi tamamlamak için isteği onayla.';
+        return 'The request was rejected in your wallet. Approve it to finish signing in.';
       case 'WRONG_NETWORK':
-        return `Cüzdanın farklı bir ağda. Cüzdanını ${networkLabel()} ağına al ve tekrar dene.`;
+        return `Your wallet is on a different network. Switch it to ${networkLabel()} and try again.`;
       case 'NOT_AVAILABLE':
+      case 'MISSING_CONFIG':
         return err.message;
       case 'NOT_CONNECTED':
-        return 'Cüzdan bağlı değil. Önce cüzdanını bağla.';
+        return 'No wallet connected. Connect a wallet first.';
       default:
-        return err.message || 'Cüzdan hatası.';
+        return err.message || 'Wallet error.';
     }
   }
 
   if (err instanceof Sep10Error) {
     switch (err.code) {
       case 'WRONG_NETWORK':
-        return `Sunucu ile cüzdan aynı ağda değil. Uygulama ${networkLabel()} ağında çalışıyor.`;
+        return `The server and your wallet are on different networks. This app runs on ${networkLabel()}.`;
       case 'EXPIRED_CHALLENGE':
-        return 'Giriş isteğinin süresi doldu. Tekrar dene.';
+        return 'The sign-in request expired. Please try again.';
       case 'ADDRESS_MISMATCH':
-        return 'Giriş isteği başka bir cüzdan adresi için üretilmiş. Cüzdanını kontrol et.';
+        return 'The sign-in request was issued for a different wallet address. Check your wallet.';
       default:
         return err.message;
     }
@@ -40,29 +41,27 @@ export function userMessage(err: unknown): string {
   if (err instanceof ApiError) {
     switch (err.status) {
       case 0:
-        return `Sunucuya ulaşılamadı. Backend çalışıyor mu? (EXPO_PUBLIC_API_BASE_URL)`;
+        return 'Could not reach the server. Is the backend running? (EXPO_PUBLIC_API_BASE_URL)';
       case 401:
-        return 'Oturum doğrulanamadı ya da süresi doldu. Cüzdanınla tekrar giriş yap.';
+        return 'Your session could not be verified or has expired. Sign in again with your wallet.';
       case 403:
-        return 'Bu işlem için yetkin yok.';
+        return 'You are not allowed to do that.';
       case 404:
-        return 'Kayıt bulunamadı.';
+        return 'Not found.';
       case 409:
-        return 'Bu cüzdan ya da kullanıcı adı zaten kayıtlı.';
+        return 'This wallet or username is already registered.';
       case 400:
       case 422:
         return err.message; // sunucunun alan bazlı mesajı
       case 429:
-        return 'Çok fazla istek gönderildi. Biraz bekleyip tekrar dene.';
+        return 'Too many requests. Wait a moment and try again.';
       default:
-        return err.status >= 500
-          ? `Sunucu hatası (${err.status}). Lütfen tekrar dene.`
-          : err.message;
+        return err.status >= 500 ? `Server error (${err.status}). Please try again.` : err.message;
     }
   }
 
   if (err instanceof Error) return err.message;
-  return 'Bilinmeyen bir hata oluştu.';
+  return 'Something went wrong.';
 }
 
 export function networkLabel(): string {

@@ -57,8 +57,8 @@ function SwipeDeckInner<T>(
     onSwipe,
     renderEmpty,
     onTopChange,
-    leftLabel = 'GEÇ',
-    rightLabel = 'TEKLİF',
+    leftLabel = 'SKIP',
+    rightLabel = 'OFFER',
   }: SwipeDeckProps<T>,
   ref: React.Ref<SwipeDeckHandle>,
 ) {

@@ -27,6 +27,6 @@ export const env = {
 
 /** Eksik ama zorunlu bir değer çağrıldığında anlaşılır hata üretir. */
 export function requireEnv<T extends string>(value: T, name: string): T {
-  if (!value) throw new Error(`Eksik ortam değişkeni: ${name} (.env.example'a bakın)`);
+  if (!value) throw new Error(`Missing environment variable: ${name} (see .env.example)`);
   return value;
 }

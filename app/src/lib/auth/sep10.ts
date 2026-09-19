@@ -41,7 +41,7 @@ export async function loginWithSep10(address: string): Promise<Sep10Session> {
 
   if (networkPassphrase !== stellarConfig.networkPassphrase) {
     throw new Sep10Error(
-      `Sunucu farklı bir ağ için challenge üretti. İstemci ${stellarConfig.network} ağında.`,
+      `The server issued a challenge for a different network. This app is on ${stellarConfig.network}.`,
       'WRONG_NETWORK',
     );
   }
@@ -51,7 +51,7 @@ export async function loginWithSep10(address: string): Promise<Sep10Session> {
   const signed = await wallet.signTransaction(transaction, { networkPassphrase, address });
   const { token, expiresAt } = await authApi.verify(signed);
 
-  if (!token) throw new Sep10Error('Sunucu oturum anahtarı döndürmedi.', 'NO_TOKEN');
+  if (!token) throw new Sep10Error('The server did not return a session token.', 'NO_TOKEN');
 
   const expiresAtMs = expiresAt ? Date.parse(expiresAt) : jwtExpiresAt(token);
   return { token, expiresAt: Number.isFinite(expiresAtMs) ? (expiresAtMs as number) : null };
@@ -69,38 +69,41 @@ export function assertValidChallenge(
   try {
     tx = TransactionBuilder.fromXDR(xdr, networkPassphrase);
   } catch {
-    throw new Sep10Error('Sunucudan gelen challenge çözümlenemedi.', 'INVALID_CHALLENGE');
+    throw new Sep10Error('The challenge from the server could not be parsed.', 'INVALID_CHALLENGE');
   }
 
   if ('innerTransaction' in tx) {
-    throw new Sep10Error('Challenge fee-bump işlemi olamaz.', 'INVALID_CHALLENGE');
+    throw new Sep10Error('A challenge cannot be a fee-bump transaction.', 'INVALID_CHALLENGE');
   }
 
   if (tx.sequence !== '0') {
-    throw new Sep10Error('Challenge sequence numarası 0 olmalı.', 'INVALID_CHALLENGE');
+    throw new Sep10Error('The challenge sequence number must be 0.', 'INVALID_CHALLENGE');
   }
 
   const bounds = tx.timeBounds;
   if (!bounds) {
-    throw new Sep10Error('Challenge zaman aralığı taşımıyor.', 'INVALID_CHALLENGE');
+    throw new Sep10Error('The challenge has no time bounds.', 'INVALID_CHALLENGE');
   }
   const now = Math.floor(Date.now() / 1000);
   const minTime = Number(bounds.minTime);
   const maxTime = Number(bounds.maxTime);
   if (maxTime === 0 || now > maxTime) {
-    throw new Sep10Error('Challenge süresi doldu. Girişi tekrar başlat.', 'EXPIRED_CHALLENGE');
+    throw new Sep10Error('The challenge expired. Start signing in again.', 'EXPIRED_CHALLENGE');
   }
   if (now + 60 < minTime) {
-    throw new Sep10Error('Challenge henüz geçerli değil (saat farkı?).', 'EXPIRED_CHALLENGE');
+    throw new Sep10Error('The challenge is not valid yet (clock skew?).', 'EXPIRED_CHALLENGE');
   }
 
   const first = tx.operations[0];
   if (!first || first.type !== 'manageData') {
-    throw new Sep10Error('Challenge beklenen manageData işlemini içermiyor.', 'INVALID_CHALLENGE');
+    throw new Sep10Error(
+      'The challenge does not contain the expected manageData operation.',
+      'INVALID_CHALLENGE',
+    );
   }
   if (first.source !== address) {
     throw new Sep10Error(
-      'Challenge başka bir cüzdan adresi için üretilmiş. Bağlı cüzdanı kontrol et.',
+      'The challenge was issued for a different wallet address. Check the connected wallet.',
       'ADDRESS_MISMATCH',
     );
   }

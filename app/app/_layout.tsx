@@ -62,7 +62,7 @@ export default function RootLayout() {
             <Stack.Screen name="(auth)" />
             <Stack.Screen name="(customer)" />
             <Stack.Screen name="(trader)" />
-            <Stack.Screen name="ilan/olustur" options={{ presentation: 'modal' }} />
+            <Stack.Screen name="listing/create" options={{ presentation: 'modal' }} />
           </Stack>
         </QueryClientProvider>
       </SafeAreaProvider>

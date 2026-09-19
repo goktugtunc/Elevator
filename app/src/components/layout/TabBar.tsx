@@ -16,26 +16,26 @@ import { Text } from '@/components/ui';
 import { colors, layout, shadow, spacing } from '@/theme';
 
 /**
- * Figma "Tab Bar/Müşteri" ve "Tab Bar/Trader".
+ * Figma "Tab Bar/Müşteri" ve "Tab Bar/Trader" (arayüz metinleri İngilizce).
  * Ortadaki Keşfet sekmesi yükseltilmiş yuvarlak buton olarak çizilir.
  * Rol farkı yalnızca 2. sekmede: Müşteri → Hareketler, Trader → İşlemler.
  */
 const ICONS: Record<string, LucideIcon> = {
-  panel: LayoutGrid,
-  hareketler: TrendingUp,
-  islemler: ArrowLeftRight,
-  kesfet: Compass,
-  ilanlarim: Briefcase,
-  profil: User,
+  dashboard: LayoutGrid,
+  activity: TrendingUp,
+  trades: ArrowLeftRight,
+  discover: Compass,
+  listings: Briefcase,
+  profile: User,
 };
 
 const LABELS: Record<string, string> = {
-  panel: 'Panel',
-  hareketler: 'Hareketler',
-  islemler: 'İşlemler',
-  kesfet: 'Keşfet',
-  ilanlarim: 'İlanlarım',
-  profil: 'Profil',
+  dashboard: 'Dashboard',
+  activity: 'Activity',
+  trades: 'Trades',
+  discover: 'Discover',
+  listings: 'Listings',
+  profile: 'Profile',
 };
 
 export function TabBar({ state, navigation }: BottomTabBarProps) {
@@ -47,7 +47,7 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
           const focused = state.index === index;
           const Icon = ICONS[route.name] ?? LayoutGrid;
           const label = LABELS[route.name] ?? route.name;
-          const isCenter = route.name === 'kesfet';
+          const isCenter = route.name === 'discover';
           const onPress = () => {
             const event = navigation.emit({
               type: 'tabPress',

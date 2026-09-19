@@ -6,7 +6,7 @@ import { Screen, TopBar } from '@/components/layout';
 import { Button, Card, Chip, Field, Pill, Progress, Text } from '@/components/ui';
 import { type RegisterPayload } from '@/lib/api';
 import { userMessage } from '@/lib/errors';
-import { parseTRNumber } from '@/lib/format';
+import { parseNumberInput } from '@/lib/format';
 import { shortAddress } from '@/lib/stellar';
 import { useSession } from '@/store/session';
 import { MARKETS, RISK_LABEL, RISK_LEVELS, type Market, type RiskLevel } from '@/types';
@@ -52,16 +52,16 @@ export default function RegisterDetails() {
   const buildPayload = (): { payload?: RegisterPayload; errors: Errors } => {
     const next: Errors = {};
     const name = username.trim();
-    if (name.length < 3) next.username = 'En az 3 karakter olmalı.';
-    else if (name.length > 24) next.username = 'En fazla 24 karakter olabilir.';
+    if (name.length < 3) next.username = 'Use at least 3 characters.';
+    else if (name.length > 24) next.username = 'Use at most 24 characters.';
     else if (!/^[a-zA-Z0-9._]+$/.test(name))
-      next.username = 'Yalnızca harf, rakam, nokta ve alt çizgi kullanılabilir.';
-    if (markets.length === 0) next.markets = 'En az bir piyasa seç.';
+      next.username = 'Letters, numbers, dots and underscores only.';
+    if (markets.length === 0) next.markets = 'Pick at least one market.';
 
     if (!isTrader) {
-      const budgetTRY = parseTRNumber(budget);
-      if (budgetTRY === null || budgetTRY <= 0) next.budget = 'Geçerli bir tutar gir.';
-      if (!risk) next.risk = 'Risk tercihini seç.';
+      const budgetTRY = parseNumberInput(budget);
+      if (budgetTRY === null || budgetTRY <= 0) next.budget = 'Enter a valid amount.';
+      if (!risk) next.risk = 'Choose your risk preference.';
       if (Object.keys(next).length > 0) return { errors: next };
       return {
         errors: next,
@@ -76,13 +76,13 @@ export default function RegisterDetails() {
     }
 
     const summary = strategy.trim();
-    if (summary.length < 20) next.strategy = 'Stratejini en az 20 karakterle anlat.';
-    else if (summary.length > 280) next.strategy = 'En fazla 280 karakter olabilir.';
-    const commissionPct = parseTRNumber(commission);
+    if (summary.length < 20) next.strategy = 'Describe your strategy in at least 20 characters.';
+    else if (summary.length > 280) next.strategy = 'Use at most 280 characters.';
+    const commissionPct = parseNumberInput(commission);
     if (commissionPct === null || commissionPct <= 0 || commissionPct > 50)
-      next.commission = '%0 ile %50 arasında bir oran gir.';
-    const minCapitalTRY = parseTRNumber(minCapital);
-    if (minCapitalTRY === null || minCapitalTRY <= 0) next.minCapital = 'Geçerli bir tutar gir.';
+      next.commission = 'Enter a rate between 0% and 50%.';
+    const minCapitalTRY = parseNumberInput(minCapital);
+    if (minCapitalTRY === null || minCapitalTRY <= 0) next.minCapital = 'Enter a valid amount.';
     if (Object.keys(next).length > 0) return { errors: next };
     return {
       errors: next,
@@ -118,34 +118,36 @@ export default function RegisterDetails() {
 
   return (
     <Screen padded={false}>
-      <TopBar title="Kayıt Ol" />
+      <TopBar title="Sign up" />
       <View style={styles.body}>
         <Progress
           value={1}
-          label={`Adım 2/2 · ${isTrader ? 'Trader Bilgileri' : 'Müşteri Bilgileri'}`}
+          label={`Step 2 of 2 · ${isTrader ? 'Trader details' : 'Customer details'}`}
         />
 
         <View style={{ gap: spacing.xs }}>
-          <Text variant="h1">Seni tanıyalım</Text>
+          <Text variant="h1">Tell us about you</Text>
           <Text variant="body" color="text2">
             {isTrader
-              ? 'Bu bilgiler hizmet ilanında ve trader profilinde yatırımcılara gösterilir.'
-              : 'Bu bilgiler sana uygun trader’ları önermek ve sermaye ilanını hazırlamak için kullanılır.'}
+              ? 'Investors see this on your service listing and trader profile.'
+              : 'We use this to suggest traders that fit you and to prefill your capital listing.'}
           </Text>
         </View>
 
         <Card style={styles.walletCard}>
           <View style={{ flex: 1, gap: 2 }}>
             <Text variant="captionStrong" color="text2">
-              Cüzdan Adresi
+              Wallet address
             </Text>
-            <Text variant="numericSm">{address ? shortAddress(address, 6, 6) : 'Bağlı değil'}</Text>
+            <Text variant="numericSm">
+              {address ? shortAddress(address, 6, 6) : 'Not connected'}
+            </Text>
           </View>
           {address ? (
-            <Pill label="Bağlı" tone="navy" />
+            <Pill label="Connected" tone="navy" />
           ) : (
             <Button
-              title="Cüzdan Bağla"
+              title="Connect wallet"
               variant="secondary"
               size="sm"
               loading={busy}
@@ -158,71 +160,71 @@ export default function RegisterDetails() {
         </Card>
 
         <Field
-          label="Kullanıcı Adı"
+          label="Username"
           value={username}
           onChangeText={setUsername}
-          placeholder={isTrader ? 'ör. kaandemir' : 'ör. elifyilmaz'}
+          placeholder={isTrader ? 'e.g. kaandemir' : 'e.g. elifyilmaz'}
           autoCapitalize="none"
           autoCorrect={false}
           maxLength={24}
           error={errors.username}
-          hint="Profilinde @kullaniciadi olarak görünür."
+          hint="Shown as @username on your profile."
         />
 
         {isTrader ? (
           <>
             <ChipGroup
-              label="Uzman Olduğun Piyasalar"
+              label="Markets you specialise in"
               error={errors.markets}
-              hint="Birden fazla seçebilirsin."
+              hint="Pick as many as you like."
               options={MARKETS.map((m) => ({ key: m, label: m, active: markets.includes(m) }))}
               onToggle={(key) => toggleMarket(key as Market)}
             />
             <Field
-              label="Strateji Özeti"
+              label="Strategy summary"
               value={strategy}
               onChangeText={setStrategy}
-              placeholder="Hangi piyasada, hangi vadede, nasıl bir risk yönetimiyle işlem yapıyorsun?"
+              placeholder="Which markets, what time horizon, how do you manage risk?"
               multiline
               maxLength={280}
               error={errors.strategy}
-              hint={`${strategy.trim().length}/280 · Yatırımcılar bu metni profilinde görür.`}
+              hint={`${strategy.trim().length}/280 · Investors read this on your profile.`}
             />
             <Field
-              label="Komisyon Oranı"
+              label="Commission rate"
               value={commission}
               onChangeText={setCommission}
               placeholder="20"
               keyboardType="decimal-pad"
               suffix="%"
               error={errors.commission}
-              hint="Kârdan alacağın pay. Sözleşmede bu oran yazılır."
+              hint="Your share of the profit — written into the contract."
             />
             <Field
-              label="Min. Sermaye"
+              label="Min. capital"
               value={minCapital}
               onChangeText={setMinCapital}
-              placeholder="50.000"
+              placeholder="50,000"
               keyboardType="decimal-pad"
-              suffix="TL"
+              suffix="TRY"
               error={errors.minCapital}
-              hint="Bu tutarın altındaki teklifler sana gösterilmez."
+              hint="Offers below this amount are hidden from you."
             />
           </>
         ) : (
           <>
             <Field
-              label="Yatırım Bütçesi"
+              label="Investment budget"
               value={budget}
               onChangeText={setBudget}
-              placeholder="250.000"
+              placeholder="250,000"
               keyboardType="decimal-pad"
-              suffix="TL"
+              suffix="TRY"
               error={errors.budget}
-              hint="Sermayen cüzdanında kalır; bu tutar yalnızca eşleştirme için kullanılır."
+              hint="Your capital stays in your wallet; this is only used for matching."
             />
             <ChipGroup
-              label="Risk Tercihi"
+              label="Risk preference"
               error={errors.risk}
               options={RISK_LEVELS.map((level) => ({
                 key: level,
@@ -232,9 +234,9 @@ export default function RegisterDetails() {
               onToggle={(key) => setRisk(key as RiskLevel)}
             />
             <ChipGroup
-              label="İlgilendiğin Piyasalar"
+              label="Markets you care about"
               error={errors.markets}
-              hint="Birden fazla seçebilirsin."
+              hint="Pick as many as you like."
               options={MARKETS.map((m) => ({ key: m, label: m, active: markets.includes(m) }))}
               onToggle={(key) => toggleMarket(key as Market)}
             />
@@ -244,7 +246,7 @@ export default function RegisterDetails() {
         {formError ? (
           <View style={styles.errorBox}>
             <Text variant="captionStrong" color="loss">
-              Kayıt tamamlanamadı
+              Sign-up failed
             </Text>
             <Text variant="caption" color="text2">
               {formError}
@@ -252,9 +254,9 @@ export default function RegisterDetails() {
           </View>
         ) : null}
 
-        <Button title="Kaydı Tamamla" fullWidth loading={busy} onPress={onSubmit} />
+        <Button title="Create account" fullWidth loading={busy} onPress={onSubmit} />
         <Text variant="caption" color="text3" align="center">
-          Kaydı tamamladığında rolün cüzdan adresine bağlanır ve giriş için SEP-10 imzası istenir.
+          Finishing sign-up links your role to this wallet address and asks for a SEP-10 signature.
         </Text>
       </View>
     </Screen>

@@ -1,14 +1,14 @@
 import { Placeholder, Screen, TopBar } from '@/components/layout';
 
 /** Figma 9c Sohbet (node 28:266) — sprint görevi için bkz. SPRINT-1.md */
-export default function MesajlarThread() {
+export default function MessageThread() {
   return (
     <Screen padded={false}>
-      <TopBar title="Sohbet" />
+      <TopBar title="Chat" />
       <Placeholder
-        screen="9c Sohbet"
+        screen="9c Chat"
         figmaNode="28:266"
-        notes="Balonlu mesaj akışı, 'Mesaj yaz…' alanı. Sözleşme önerisi → /sozlesme/[id]."
+        notes="Bubble message stream with a Write a message field. Contract proposal goes to /contract/[id]."
       />
     </Screen>
   );

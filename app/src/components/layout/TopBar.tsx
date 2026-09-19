@@ -19,7 +19,7 @@ export function TopBar({ title, onBack, right }: TopBarProps) {
     <View style={styles.bar}>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel="Geri"
+        accessibilityLabel="Back"
         onPress={goBack}
         hitSlop={8}
         style={styles.back}
