@@ -39,6 +39,8 @@ interface SessionState {
   hydrate: () => Promise<void>;
   markOnboardingSeen: () => Promise<void>;
   connectWallet: (options?: { mode?: NativeWalletMode; walletId?: string }) => Promise<string>;
+  /** Var olan bir Stellar gizli anahtarını (S…) uygulama içi cüzdan olarak alır. */
+  importWallet: (secret: string) => Promise<string>;
   cancelPairing: () => void;
   signIn: () => Promise<void>;
   register: (payload: RegisterIn) => Promise<void>;
@@ -142,6 +144,16 @@ export const useSession = create<SessionState>((set, get) => ({
       set({ pairingUri: null });
       throw err;
     }
+  },
+
+  async importWallet(secret) {
+    set({ error: null });
+    await localWallet.importSecret(secret);
+    // Anahtar güvenli depoya yazıldı; bağlanmayı adaptöre bırakıyoruz ki
+    // cüzdan modu ('local') tek yerden kaydedilsin.
+    const address = await get().connectWallet({ mode: 'local' });
+    debugLog('wallet:local', 'anahtar içe aktarıldı', { address });
+    return address;
   },
 
   cancelPairing() {

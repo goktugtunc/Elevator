@@ -32,6 +32,21 @@ export function describeError(err: unknown): Record<string, unknown> {
       ...(extra.status !== undefined ? { status: extra.status } : {}),
     };
   }
+  // WalletConnect relay'i düz nesne fırlatıyor ({ message, code }); `String(err)`
+  // bunu "[object Object]" yapıp tek bilgiyi yutuyordu.
+  if (err && typeof err === 'object') {
+    const o = err as Record<string, unknown>;
+    const picked: Record<string, unknown> = {};
+    for (const k of ['message', 'code', 'reason', 'name', 'context', 'data']) {
+      if (o[k] !== undefined) picked[k] = o[k];
+    }
+    if (Object.keys(picked).length > 0) return picked;
+    try {
+      return { value: JSON.stringify(o) };
+    } catch {
+      return { value: Object.prototype.toString.call(o) };
+    }
+  }
   return { value: String(err) };
 }
 
