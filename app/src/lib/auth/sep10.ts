@@ -1,6 +1,7 @@
 import { TransactionBuilder } from '@stellar/stellar-sdk';
 
 import { authApi } from '@/lib/api';
+import { debugError, debugLog } from '@/lib/log';
 import { stellarConfig } from '@/lib/stellar';
 import { wallet } from '@/lib/wallet';
 
@@ -37,7 +38,16 @@ export interface Sep10Session {
 }
 
 export async function loginWithSep10(address: string): Promise<Sep10Session> {
-  const { transaction, networkPassphrase } = await authApi.challenge(address);
+  debugLog('auth:sep10', 'challenge isteniyor', { address });
+  let challenge;
+  try {
+    challenge = await authApi.challenge(address);
+  } catch (err) {
+    debugError('auth:sep10', 'challenge alınamadı (backend hazır mı?)', err);
+    throw err;
+  }
+  const { transaction, networkPassphrase } = challenge;
+  debugLog('auth:sep10', 'challenge alındı, doğrulanıyor');
 
   if (networkPassphrase !== stellarConfig.networkPassphrase) {
     throw new Sep10Error(
@@ -48,8 +58,18 @@ export async function loginWithSep10(address: string): Promise<Sep10Session> {
 
   assertValidChallenge(transaction, { address, networkPassphrase });
 
+  debugLog('auth:sep10', 'cüzdandan imza isteniyor');
   const signed = await wallet.signTransaction(transaction, { networkPassphrase, address });
-  const { token, expiresAt } = await authApi.verify(signed);
+  debugLog('auth:sep10', 'imza alındı, /auth/verify çağrılıyor');
+  let verified;
+  try {
+    verified = await authApi.verify(signed);
+  } catch (err) {
+    debugError('auth:sep10', '/auth/verify başarısız', err);
+    throw err;
+  }
+  const { token, expiresAt } = verified;
+  debugLog('auth:sep10', 'giriş tamam', { expiresAt: expiresAt ?? 'JWT exp' });
 
   if (!token) throw new Sep10Error('The server did not return a session token.', 'NO_TOKEN');
 

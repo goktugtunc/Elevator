@@ -11,6 +11,7 @@
 import { Keypair, TransactionBuilder } from '@stellar/stellar-sdk';
 
 import { WalletError } from './types';
+import { debugLog } from '@/lib/log';
 import { stellarConfig } from '@/lib/stellar/config';
 import { STORAGE_KEYS, secureStorage } from '@/lib/storage';
 
@@ -47,6 +48,7 @@ export const localWallet = {
     const keypair = Keypair.random();
     await secureStorage.set(STORAGE_KEYS.walletSecret, keypair.secret());
     cached = keypair;
+    debugLog('wallet:local', 'yeni cüzdan üretildi', { address: keypair.publicKey() });
     return keypair.publicKey();
   },
 

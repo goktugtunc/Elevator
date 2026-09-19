@@ -18,6 +18,7 @@ import * as Linking from 'expo-linking';
 import { UniversalProvider } from '@walletconnect/universal-provider';
 
 import { WalletError, type ConnectOptions, type WalletAdapter } from './types';
+import { debugError, debugLog } from '@/lib/log';
 import { env } from '@/lib/env';
 import { stellarConfig } from '@/lib/stellar/config';
 
@@ -115,7 +116,11 @@ export const walletConnectWallet: WalletAdapter = {
       const existing = sessionAddress(provider);
       if (existing) return { address: existing, walletId: 'walletconnect' };
 
-      const onUri = (uri: string) => options?.onUri?.(uri);
+      debugLog('wallet:wc', 'eşleşme başlatılıyor', { chain: CHAIN, methods: METHODS });
+      const onUri = (uri: string) => {
+        debugLog('wallet:wc', 'display_uri alındı', { uri: uri.slice(0, 40) });
+        options?.onUri?.(uri);
+      };
       provider.on('display_uri', onUri);
       try {
         const session = await provider.connect({
@@ -124,6 +129,10 @@ export const walletConnectWallet: WalletAdapter = {
           },
         });
         const account = session?.namespaces?.stellar?.accounts?.[0];
+        debugLog('wallet:wc', 'oturum yanıtı', {
+          accounts: session?.namespaces?.stellar?.accounts ?? null,
+          peer: session?.peer?.metadata?.name ?? null,
+        });
         if (!account) {
           throw new WalletError('The wallet did not return a Stellar account.', 'NOT_CONNECTED');
         }
@@ -132,6 +141,7 @@ export const walletConnectWallet: WalletAdapter = {
         provider.off('display_uri', onUri);
       }
     } catch (err) {
+      debugError('wallet:wc', 'bağlantı başarısız', err);
       throw mapError(err);
     }
   },

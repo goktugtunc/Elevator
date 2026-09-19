@@ -1,6 +1,7 @@
 import { Linking } from 'react-native';
 
 import { WalletError } from './types';
+import { debugError, debugLog } from '@/lib/log';
 
 /**
  * WalletConnect eşleşme URI'sini cihazdaki cüzdan uygulamasında açmak.
@@ -78,14 +79,30 @@ export function pairingLinks(target: WalletLinkTarget, wcUri: string): string[] 
  */
 export async function openPairing(target: WalletLinkTarget, wcUri: string): Promise<string> {
   const links = pairingLinks(target, wcUri);
-  for (const link of links) {
+  debugLog('wallet:deeplink', `${target.label} için ${links.length} biçim denenecek`, {
+    scheme: target.native ?? target.universal,
+    verified: target.verified,
+  });
+  for (const [i, link] of links.entries()) {
     try {
       await Linking.openURL(link);
+      debugLog('wallet:deeplink', `${target.label} AÇILDI (biçim ${i + 1}/${links.length})`, {
+        link: link.split('?')[0],
+      });
       return link;
-    } catch {
-      // bu biçimi karşılayan uygulama yok; sıradakini dene
+    } catch (err) {
+      debugError(
+        'wallet:deeplink',
+        `biçim ${i + 1}/${links.length} reddedildi: ${link.split('?')[0]}`,
+        err,
+      );
     }
   }
+  debugError(
+    'wallet:deeplink',
+    `${target.label} hiçbir biçimle açılamadı`,
+    new Error('no handler'),
+  );
   throw new WalletError(
     `Could not open ${target.label}. Is it installed? If not, scan the QR code with a wallet on another device.`,
     'NOT_AVAILABLE',

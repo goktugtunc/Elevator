@@ -1,4 +1,5 @@
 import { env } from '@/lib/env';
+import { debugError, debugLog } from '@/lib/log';
 import { STORAGE_KEYS, secureStorage } from '@/lib/storage';
 
 /**
@@ -74,6 +75,7 @@ async function request<T>(method: Method, path: string, options: RequestOptions 
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
   } catch (err) {
+    debugError('api', `${method} ${url.pathname} — sunucuya ulaşılamadı`, err);
     throw new ApiError(0, err instanceof Error ? err.message : `${method} ${path} failed`);
   }
 
@@ -91,8 +93,14 @@ async function request<T>(method: Method, path: string, options: RequestOptions 
     const serverMessage = envelope && 'message' in envelope ? String(envelope.message) : '';
     const code = envelope && typeof envelope.code === 'string' ? envelope.code : undefined;
     const message = serverMessage || `${method} ${path} → ${res.status}`;
+    debugError(
+      'api',
+      `${method} ${url.pathname} → ${res.status}`,
+      new ApiError(res.status, message, data, code),
+    );
     throw new ApiError(res.status, message, data, code);
   }
+  debugLog('api', `${method} ${url.pathname} → ${res.status}`);
   return data as T;
 }
 
