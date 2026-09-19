@@ -63,10 +63,31 @@ export interface TraderProfile extends UserProfile {
   tags: string[]; // "Düşük Drawdown", "12 Ay+", "Hızlı Yanıt"
 }
 
+/**
+ * İlan sahibinin kart üzerinde gösterilen özeti.
+ * BE-03: `/listings` yanıtında gömülü gelmeli — aksi hâlde Keşfet kartı
+ * yalnızca cüzdan adresini gösterebilir (ek istek atmamak için).
+ */
+export interface ListingOwner {
+  address: string;
+  username: string;
+  avatarInitials: string;
+  role: Role;
+  handle?: string; // @kaandemir
+  rating?: number;
+  ratingCount?: number;
+  return12mPct?: number;
+  maxDrawdownPct?: number;
+  activeInvestors?: number;
+  sparkline?: number[];
+  tags?: string[];
+}
+
 /** Müşterinin "Sermaye İlanı" ya da trader'ın "Hizmet İlanı". */
 export interface Listing {
   id: string;
   ownerAddress: string;
+  owner?: ListingOwner;
   kind: 'capital' | 'service';
   title: string;
   market: Market;

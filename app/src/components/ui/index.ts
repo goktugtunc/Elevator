@@ -9,5 +9,7 @@ export { Avatar, initialsOf } from './Avatar';
 export { KpiBox, Stat } from './KpiBox';
 export { Segmented } from './Segmented';
 export { Field } from './Field';
+export { Sparkline } from './Sparkline';
+export type { SparklineProps } from './Sparkline';
 export { ListRow } from './ListRow';
 export { Card } from './Card';

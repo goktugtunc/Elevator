@@ -34,7 +34,7 @@
 | FE-02 | ~~Onboarding + Giriş (cüzdan) + Rol Seçimi~~ | 19:13 · 19:109 · 19:181 | M | — | Claude | ✅ |
 | FE-03 | ~~Kayıt · Bilgiler formu (Müşteri / Trader varyantı), `session.register()` bağlantısı~~ | 19:269 · 19:353 | M | BE-01 (`POST /register`) | Claude | ✅ |
 | FE-04 | SEP-10 istemci tarafı: challenge doğrulama, JWT süresi/401 yenileme, hata mesajları (yanlış ağ, reddedilen imza) | 19:109 | S | BE-02 (`/auth/*`) | Claude | 🟡 |
-| FE-05 | Keşfet · kaydırmalı deck (gesture-handler + reanimated): kart bileşeni, sağa kaydırma = Teklif İste / Ver, sola = Geç, Takip Et/Kaydet | 21:30 · 21:282 | L | — (UI), BE-03 (`GET /listings`) | | ⬜ |
+| FE-05 | Keşfet · kaydırmalı deck (gesture-handler + reanimated): kart bileşeni, sağa kaydırma = Teklif İste / Ver, sola = Geç, Takip Et/Kaydet | 21:30 · 21:282 | L | — (UI), BE-03 (`GET /listings`) | Claude | 🟡 |
 | FE-06 | Keşfet · Trader varyantı + "Teklif Ver" bottom sheet (Komisyon, getiri aralığı, not) | 21:160 · 21:414 | M | FE-05 | | ⬜ |
 | FE-07 | Bottom Sheet + Switch + Progress ortak bileşenleri (Yeni İşlem, Görünümü Düzenle, Teklif Ver tarafından kullanılır) | 23:181 · 30:536 | S | — | | ⬜ |
 | FE-08 | Mesajlar listesi + Sohbet ekranı | 28:171 · 28:266 | M | BE-04 (`/messages`) | | ⬜ |
@@ -49,7 +49,7 @@
 | FE-17 | Trader Profili (KPI grid, performans segmented + sparkline, canlı hareketler, strateji, yorumlar) | 22:171 | M | BE-03, BE-08 | | ⬜ |
 | FE-18 | Profil (iki rol) + Cüzdan (Horizon bakiye, TRY Yatır/Çek → SEP-24 interactive URL `expo-web-browser`, durum sorgusu, son işlemler) | 27:436 · 27:569 · 27:699 | L | BE-09 (`/anchor/*`) | | ⬜ |
 | FE-19 | Bildirimler (liste, gruplar, tümünü oku, boş durum) | 27:96 · 27:240 · 27:371 | S | BE-10 (`/notifications`) | | ⬜ |
-| FE-20 | Sparkline bileşeni (react-native-svg) — Panel, Keşfet kartı, Trader Profili | — | S | — | | ⬜ |
+| FE-20 | ~~Sparkline bileşeni (react-native-svg) — Panel, Keşfet kartı, Trader Profili~~ | — | S | — | Claude | ✅ |
 | FE-21 | Web deploy (Vercel / Netlify / EAS Hosting — karar §8.15) + `.env` production değerleri + herkese açık URL | — | S | BE-05 | | ⬜ |
 | FE-22 | README: kurulum, test adımları, ekran görüntüleri, Stellar entegrasyon listesi; Mermaid diyagramı güncel | — | S | — | | ⬜ |
 | FE-23 | Uçtan uca demo provası: giriş → ilan → yatırma → sözleşme → ödeme → çekim (Testnet, gerçek veri) | — | M | tüm BE-* | | ⬜ |
@@ -57,6 +57,8 @@
 **FE-03 notu:** Form, doğrulama ve `session.register()` bağlantısı hazır; gövde şeması `lib/api/endpoints.ts` içinde `CustomerRegisterPayload` / `TraderRegisterPayload` olarak tiplendi ve BE-01 için öneri niteliğinde. Backend ayağa kalkınca gerçek `POST /register` ile uçtan uca denenecek; şu an hata durumu ekranda gösteriliyor.
 
 **FE-04 notu (🟡 = istemci hazır, BE-02 bekleniyor):** Challenge imzalanmadan önce doğrulanıyor (sequence 0, zaman aralığı, istemci hesabına ait `manageData`, ağ passphrase'i). JWT'nin `exp` claim'i okunup saklanıyor; süresi dolmuş token'la açılışta girişe düşülüyor. 401 gelen her istek `registerAuthBridge` üzerinden bir kez SEP-10 yenilemesi deniyor (SEP-10'da refresh token yok → cüzdanda imza isteği açılır), başarısızsa oturum kapanıp giriş ekranında uyarı gösteriliyor. Hata metinleri tek kaynakta: `src/lib/errors.ts`. Gerçek `/auth/challenge` + `/auth/verify` ile uçtan uca doğrulama BE-02 ayağa kalkınca yapılacak.
+
+**FE-05 notu (🟡 = müşteri tarafı hazır, BE-03 bekleniyor):** `SwipeDeck` (gesture-handler + reanimated, buton aksiyonları için imperative `swipe()`) ve `ServiceListingCard` yazıldı; Keşfet · Müşteri ekranı `GET /listings?kind=service` sorgusuna bağlandı — yükleniyor / boş / hata / deste bitti durumları ekranda. Sağa kaydırma `POST /listings/:id/requests` (BE-03 önerisi), kalp `POST /follow`. Trader varyantı ve "Teklif Ver" sheet'i FE-06'da. **Açık:** DoD-3 (Chrome 390px elle kontrol) henüz yapılmadı — `npm run web` ile bakılmalı.
 
 Backend'e bağımlı olmayan, hemen başlanabilecek işler: **FE-05, FE-07, FE-13, FE-20** ve tüm ekranların UI katmanı (veri bağlantısı sonra).
 

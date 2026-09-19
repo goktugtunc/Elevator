@@ -75,6 +75,12 @@ export const listingsApi = {
   mine: () => http.get<Listing[]>('/my/listings'),
   create: (payload: Partial<Listing>) => http.post<Listing>('/listings', payload),
   offers: (listingId: string) => http.get<Offer[]>(`/listings/${listingId}/offers`),
+  /**
+   * BE-03 önerisi (Keşfet sağa kaydırma):
+   * müşteri hizmet ilanına teklif ister, trader müşteri ilanına teklif verir.
+   */
+  requestOffer: (listingId: string, note?: string) =>
+    http.post<Offer>(`/listings/${listingId}/requests`, { note }),
 };
 
 // --- Takip ---
