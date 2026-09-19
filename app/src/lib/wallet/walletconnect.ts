@@ -10,13 +10,14 @@
  * kullanıcı cüzdanda onaylar → oturum kurulur, adres CAIP hesabından okunur.
  * Oturum WalletConnect'in kendi deposunda (AsyncStorage) kalıcıdır.
  *
- * Bu yol reown (cloud.reown.com) relay'ine bağlıdır; proje kimliği yoksa kapalı
- * kalır ve uygulama yerel cüzdan ile SEP-7'yi kullanır (bkz. ./wallet.ts).
+ * Bu yol reown relay'ine bağlıdır; proje kimliği yoksa kapalı kalır
+ * (bkz. ./wallet.ts).
  */
-import * as Linking from 'expo-linking';
-
+import * as ExpoLinking from 'expo-linking';
 import { UniversalProvider } from '@walletconnect/universal-provider';
+import { Linking } from 'react-native';
 
+import { WC_WALLETS } from './deeplinks';
 import { WalletError, type ConnectOptions, type WalletAdapter } from './types';
 import { debugError, debugLog } from '@/lib/log';
 import { env } from '@/lib/env';
@@ -36,7 +37,7 @@ const METHODS = ['stellar_signXDR', 'stellar_signAndSubmitXDR'];
  * (traderkirala://) kayıtlı DEĞİLDİR; `Linking.createURL` Expo Go'da
  * `exp://<host>/--/` üretir, derlenmiş uygulamada `traderkirala://`.
  */
-const RETURN_URL = Linking.createURL('/');
+const RETURN_URL = ExpoLinking.createURL('/');
 
 const APP_METADATA = {
   name: 'TraderKirala',
@@ -78,6 +79,64 @@ function sessionAddress(provider: Provider): string | null {
   const accounts = provider.session?.namespaces?.stellar?.accounts;
   if (!accounts || accounts.length === 0) return null;
   return addressFromAccount(accounts[0]);
+}
+
+/**
+ * İmza isteği relay üzerinden cüzdana gider ama cüzdan uygulaması kendiliğinden
+ * öne gelmez; dApp'in deep link ile açması gerekir. Adres:
+ *   1. oturumdaki cüzdanın kendi `redirect.native`'i (en doğrusu)
+ *   2. eşleşen cüzdanın kayıt defterindeki şeması
+ * Açılamazsa sessiz geçilir — kullanıcı cüzdanı elle açıp onaylayabilir.
+ */
+async function bringWalletToFront(provider: Provider): Promise<void> {
+  const peer = provider.session?.peer?.metadata;
+  const fromSession = peer?.redirect?.native || peer?.redirect?.universal;
+  const known = WC_WALLETS.find(
+    (w) => peer?.name && w.label.toLowerCase() === peer.name.toLowerCase(),
+  );
+  const candidates = [fromSession, known?.native, known?.universal].filter(
+    (v): v is string => typeof v === 'string' && v.length > 0,
+  );
+
+  debugLog('wallet:wc', 'cüzdan öne getiriliyor', { peer: peer?.name ?? null, candidates });
+
+  for (const link of candidates) {
+    try {
+      await Linking.openURL(link);
+      return;
+    } catch {
+      // sıradaki adresi dene
+    }
+  }
+  debugLog('wallet:wc', 'cüzdan açılamadı — kullanıcı elle açmalı');
+}
+
+/** İstek yanıtsız kalırsa sonsuza kadar beklemeyelim. */
+const REQUEST_TIMEOUT_MS = 120_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () =>
+        reject(
+          new WalletError(
+            'The wallet did not respond. Open your wallet app and approve the request, then try again.',
+            'UNKNOWN',
+          ),
+        ),
+      ms,
+    );
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
 }
 
 function mapError(err: unknown): WalletError {
@@ -183,10 +242,15 @@ export const walletConnectWallet: WalletAdapter = {
       if (!provider.session) {
         throw new WalletError('Wallet is not connected.', 'NOT_CONNECTED');
       }
-      const result = await provider.request<{ signedXDR: string }>(
+      debugLog('wallet:wc', 'imza isteği gönderiliyor', { method: 'stellar_signXDR' });
+      const pending = provider.request<{ signedXDR: string }>(
         { method: 'stellar_signXDR', params: { xdr } },
         CHAIN,
       );
+      // İstek yolda iken cüzdanı öne getir; kullanıcı onay ekranını görsün.
+      void bringWalletToFront(provider);
+      const result = await withTimeout(pending, REQUEST_TIMEOUT_MS);
+      debugLog('wallet:wc', 'imza alındı');
       if (!result?.signedXDR) {
         throw new WalletError('The wallet returned an empty signature.', 'UNKNOWN');
       }
