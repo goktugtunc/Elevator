@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-import { profileApi } from '@/lib/api';
+import { profileApi, type RegisterPayload } from '@/lib/api';
 import { loginWithSep10 } from '@/lib/auth';
 import { STORAGE_KEYS, plainStorage, secureStorage } from '@/lib/storage';
 import { wallet } from '@/lib/wallet';
@@ -25,7 +25,7 @@ interface SessionState {
   connectWallet: () => Promise<string>;
   signIn: () => Promise<void>;
   /** Kayıt: rol + form → backend; başarılıysa profile/rol set edilir. */
-  register: (payload: { role: Role } & Record<string, unknown>) => Promise<void>;
+  register: (payload: RegisterPayload) => Promise<void>;
   signOut: () => Promise<void>;
 }
 

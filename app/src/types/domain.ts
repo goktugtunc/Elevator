@@ -14,6 +14,8 @@ export const RISK_LABEL: Record<RiskLevel, string> = {
   high: 'Agresif',
 };
 
+export const RISK_LEVELS: RiskLevel[] = ['low', 'mid', 'high'];
+
 /** Figma "Status Chip" — status=Teklif | Onay Bekliyor | Aktif | Tamamlandı | İptal */
 export type ContractStatus = 'offer' | 'pending' | 'active' | 'completed' | 'cancelled';
 
@@ -26,6 +28,9 @@ export const STATUS_LABEL: Record<ContractStatus, string> = {
 };
 
 export type Market = 'BIST Hisse' | 'Kripto' | 'Forex' | 'Vadeli' | 'Emtia';
+
+/** Figma'daki piyasa chip'lerinin sırası (Kayıt, İlan Oluştur, Keşfet filtreleri). */
+export const MARKETS: Market[] = ['BIST Hisse', 'Kripto', 'Forex', 'Vadeli', 'Emtia'];
 
 export interface UserProfile {
   address: string; // Stellar public key (G...)

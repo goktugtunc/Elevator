@@ -49,3 +49,13 @@ export function formatRelative(iso: string, now = new Date()): string {
   return new Intl.DateTimeFormat('tr-TR', { day: 'numeric', month: 'short' }).format(d);
 }
 
+/**
+ * Kullanıcının yazdığı Türkçe sayıyı (250.000 · 12,5 · 250000) sayıya çevirir.
+ * Geçersizse null döner — form doğrulaması bunu "zorunlu/geçersiz" olarak gösterir.
+ */
+export function parseTRNumber(input: string): number | null {
+  const cleaned = input.trim().replace(/\s/g, '').replace(/\./g, '').replace(',', '.');
+  if (!cleaned || !/^\d+(\.\d+)?$/.test(cleaned)) return null;
+  const n = Number(cleaned);
+  return Number.isFinite(n) ? n : null;
+}

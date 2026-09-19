@@ -2,11 +2,12 @@ import { http } from './client';
 import type {
   AppNotification,
   Listing,
+  Market,
   Message,
   MessageThread,
   Offer,
   RentalContract,
-  Role,
+  RiskLevel,
   Trade,
   UserProfile,
   WalletTransaction,
@@ -35,10 +36,35 @@ export const authApi = {
 };
 
 // --- Profil & kayıt ---
+
+/** `POST /register` gövdesi — Figma 1f Kayıt · Bilgiler (Müşteri), node 19:269. */
+export interface CustomerRegisterPayload {
+  role: 'customer';
+  username: string;
+  budgetTRY: number;
+  riskPreference: RiskLevel;
+  markets: Market[];
+}
+
+/** `POST /register` gövdesi — Figma 1g Kayıt · Bilgiler (Trader), node 19:353. */
+export interface TraderRegisterPayload {
+  role: 'trader';
+  username: string;
+  markets: Market[];
+  strategySummary: string;
+  commissionPct: number;
+  minCapitalTRY: number;
+}
+
+/**
+ * BE-01: rolün ayırt edici alan olduğu birleşik gövde. Cüzdan adresi gövdede gönderilmez;
+ * backend SEP-10 JWT'sinden okur.
+ */
+export type RegisterPayload = CustomerRegisterPayload | TraderRegisterPayload;
+
 export const profileApi = {
   me: () => http.get<UserProfile>('/profile'),
-  register: (payload: { role: Role } & Record<string, unknown>) =>
-    http.post<UserProfile>('/register', payload),
+  register: (payload: RegisterPayload) => http.post<UserProfile>('/register', payload),
 };
 
 // --- İlanlar ---
