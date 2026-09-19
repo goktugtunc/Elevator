@@ -1,48 +1,34 @@
 import * as Clipboard from 'expo-clipboard';
 import { Copy, ExternalLink } from 'lucide-react-native';
 import { useState } from 'react';
-import { Linking, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 
 import { BottomSheet, Button, Text } from '@/components/ui';
+import { userMessage } from '@/lib/errors';
+import { WC_WALLETS, openPairing, type WalletLinkTarget } from '@/lib/wallet';
 import { colors, radius, spacing } from '@/theme';
 
 /**
  * Mobil cüzdan bağlantısı (FE-13) — WalletConnect v2 eşleşme ekranı.
- * Aynı cihazdaki cüzdan için deep link, başka cihaz/masaüstü için QR.
- * WalletConnect'i destekleyen Stellar cüzdanları: Freighter mobile, Lobstr, xBull.
- * (Freighter mobile yalnızca WalletConnect ile bağlanır — kendi belgeleri böyle diyor.)
+ * Cüzdan şemaları WalletConnect kayıt defterinden alındı (bkz. lib/wallet/deeplinks.ts);
+ * aynı cihazdaki cüzdan için deep link, başka cihaz/masaüstü için QR.
  */
-const WALLETS: { id: string; label: string; scheme: (uri: string) => string }[] = [
-  {
-    // Freighter mobile için belgelenmiş bir özel şema yok: ham wc: URI'si
-    // cihazdaki WalletConnect uyumlu uygulamaya yönlendirilir.
-    id: 'any',
-    label: 'Open installed wallet (Freighter…)',
-    scheme: (uri) => uri,
-  },
-  {
-    id: 'lobstr',
-    label: 'Open in Lobstr',
-    scheme: (uri) => `lobstr://wc?uri=${encodeURIComponent(uri)}`,
-  },
-  {
-    id: 'xbull',
-    label: 'Open in xBull',
-    scheme: (uri) => `xbull://wc?uri=${encodeURIComponent(uri)}`,
-  },
-];
-
 export function WalletConnectSheet({ uri, onClose }: { uri: string | null; onClose: () => void }) {
   const [copied, setCopied] = useState(false);
-  const [openError, setOpenError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [opening, setOpening] = useState<string | null>(null);
 
-  const openWallet = async (link: string) => {
-    setOpenError(null);
+  const open = async (target: WalletLinkTarget) => {
+    if (!uri) return;
+    setError(null);
+    setOpening(target.id);
     try {
-      await Linking.openURL(link);
-    } catch {
-      setOpenError('No wallet app responded. Install Lobstr or xBull, or scan the QR code.');
+      await openPairing(target, uri);
+    } catch (err) {
+      setError(userMessage(err));
+    } finally {
+      setOpening(null);
     }
   };
 
@@ -67,14 +53,20 @@ export function WalletConnectSheet({ uri, onClose }: { uri: string | null; onClo
           </View>
 
           <View style={styles.buttons}>
-            {WALLETS.map((w) => (
+            {WC_WALLETS.map((w) => (
               <Button
                 key={w.id}
-                title={w.label}
-                variant="secondary"
+                title={`Open in ${w.label}`}
+                variant={w.id === 'freighter' ? 'primary' : 'secondary'}
                 fullWidth
-                leftIcon={<ExternalLink size={16} color={colors.navy900} />}
-                onPress={() => openWallet(w.scheme(uri))}
+                loading={opening === w.id}
+                leftIcon={
+                  <ExternalLink
+                    size={16}
+                    color={w.id === 'freighter' ? colors.onNavy : colors.navy900}
+                  />
+                }
+                onPress={() => open(w)}
               />
             ))}
             <Button
@@ -86,18 +78,17 @@ export function WalletConnectSheet({ uri, onClose }: { uri: string | null; onClo
             />
           </View>
 
-          {openError ? (
+          {error ? (
             <View style={styles.error}>
               <Text variant="caption" color="loss">
-                {openError}
+                {error}
               </Text>
             </View>
           ) : null}
 
           <Text variant="caption" color="text3">
-            Scan the code with a wallet on another device, or tap a button above to open a wallet
-            installed on this phone — Freighter mobile, Lobstr and xBull all speak WalletConnect.
-            Connecting costs nothing — you only sign a login message.
+            Tap your wallet above to open it on this phone, or scan the code with a wallet on
+            another device. Connecting is free — you only approve a session, no funds move.
           </Text>
         </>
       ) : null}
