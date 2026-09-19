@@ -1,4 +1,3 @@
-/* eslint-disable */
 // Bu dosya üretildi — elle düzenlemeyin.
 // Kaynak: https://mobilback.yolalapp.com/openapi.json
 // Yeniden üretmek için: npm run gen:api

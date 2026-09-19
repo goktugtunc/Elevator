@@ -2,7 +2,13 @@ import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
 import { StyleSheet, View } from 'react-native';
 
-import { AsyncBoundary, EmptyState, Screen, ScreenHeader } from '@/components/layout';
+import {
+  AsyncBoundary,
+  EmptyState,
+  HeaderActions,
+  Screen,
+  ScreenHeader,
+} from '@/components/layout';
 import { Button, Card, KpiBox, ListRow, RiskBadge, StatusChip, Text } from '@/components/ui';
 import { dashboardApi } from '@/lib/api';
 import type {
@@ -29,7 +35,9 @@ export default function CustomerDashboard() {
 
   return (
     <Screen riskStrip={false} padded={false}>
-      <ScreenHeader title="Dashboard" subtitle="Your portfolio and the traders you follow" />
+      <ScreenHeader title="Dashboard" subtitle="Your portfolio and the traders you follow"
+        right={<HeaderActions />}
+      />
       <View style={styles.body}>
         <AsyncBoundary query={dash}>
           {(d) => (

@@ -4,13 +4,19 @@ import { Plus } from 'lucide-react-native';
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { AsyncBoundary, EmptyState, Screen, ScreenHeader } from '@/components/layout';
+import {
+  AsyncBoundary,
+  EmptyState,
+  HeaderActions,
+  Screen,
+  ScreenHeader,
+} from '@/components/layout';
 import { Button, Card, Pill, RiskBadge, Segmented, Text } from '@/components/ui';
 import { listingsApi } from '@/lib/api';
 import type { ListingOut, ListingStatus, UserRole } from '@/lib/api/types';
 import { userMessage } from '@/lib/errors';
 import { formatAmount, formatBps, formatDuration, formatRelative } from '@/lib/format';
-import { colors, radius, spacing } from '@/theme';
+import { colors, spacing } from '@/theme';
 
 const TABS: { value: ListingStatus; label: string }[] = [
   { value: 'active', label: 'Active' },
@@ -56,12 +62,15 @@ export function MyListings({ role }: { role: UserRole }) {
       <ScreenHeader
         title="My Listings"
         right={
-          <Button
-            title="New"
-            size="sm"
-            onPress={() => router.push('/listing/create')}
-            leftIcon={<Plus size={16} color={colors.onNavy} />}
-          />
+          <View style={styles.headerActions}>
+            <HeaderActions />
+            <Button
+              title="New"
+              size="sm"
+              onPress={() => router.push('/listing/create')}
+              leftIcon={<Plus size={16} color={colors.onNavy} />}
+            />
+          </View>
         }
       />
       <View style={styles.body}>
@@ -220,6 +229,7 @@ function Metric({ label, value }: { label: string; value: number }) {
 
 const styles = StyleSheet.create({
   body: { paddingHorizontal: spacing.lg, paddingBottom: spacing['2xl'], gap: spacing.md },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   list: { gap: spacing.md },
   card: { gap: spacing.sm },
   cardHead: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },

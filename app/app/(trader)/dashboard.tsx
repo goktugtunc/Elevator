@@ -3,7 +3,13 @@ import { useRouter } from 'expo-router';
 import { Check } from 'lucide-react-native';
 import { StyleSheet, View } from 'react-native';
 
-import { AsyncBoundary, EmptyState, Screen, ScreenHeader } from '@/components/layout';
+import {
+  AsyncBoundary,
+  EmptyState,
+  HeaderActions,
+  Screen,
+  ScreenHeader,
+} from '@/components/layout';
 import { Button, Card, KpiBox, ListRow, Pill, Progress, StatusChip, Text } from '@/components/ui';
 import { dashboardApi, offersApi } from '@/lib/api';
 import type {
@@ -54,7 +60,9 @@ export default function TraderDashboard() {
 
   return (
     <Screen riskStrip={false} padded={false}>
-      <ScreenHeader title="Dashboard" subtitle="Your capital, investors and open offers" />
+      <ScreenHeader title="Dashboard" subtitle="Your capital, investors and open offers"
+        right={<HeaderActions />}
+      />
       <View style={styles.body}>
         <AsyncBoundary query={dash}>
           {(d) => (

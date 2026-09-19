@@ -10,7 +10,7 @@ import {
 } from 'lucide-react-native';
 import { StyleSheet, View } from 'react-native';
 
-import { AsyncBoundary, Screen, ScreenHeader } from '@/components/layout';
+import { AsyncBoundary, HeaderActions, Screen, ScreenHeader } from '@/components/layout';
 import { Avatar, Card, KpiBox, ListRow, Pill, RiskBadge, Text } from '@/components/ui';
 import { SessionActions } from '@/components/wallet';
 import { notificationsApi, usersApi } from '@/lib/api';
@@ -36,7 +36,7 @@ export function ProfileScreen({ role }: { role: UserRole }) {
 
   return (
     <Screen riskStrip={false} padded={false}>
-      <ScreenHeader title="Profile" />
+      <ScreenHeader title="Profile" right={<HeaderActions />} />
       <View style={styles.body}>
         <AsyncBoundary query={me}>
           {(user) => (

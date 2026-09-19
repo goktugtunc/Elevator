@@ -26,6 +26,10 @@ POST /api/v1/auth/sep10  { transaction } → { token, expires_at, public_key, re
 ```
 
 - `registered: false` → kullanıcı `POST /users/register` akışına düşer.
+- **Kayıt yanıtı `RegisterOut`'tur, `MeOut` değil.** Gövde `{ user, token, expires_at }`
+  taşır ve buradaki token rolü içerir; eski token rolsüzdür. İstemci yeni token'ı
+  saklamazsa `/auth/me` de rol döndürmez ve kullanıcı rol seçimine geri düşer
+  (bu hata bir kez yaşandı, bkz. `store/session.ts → register`).
 - JWT süresi dolduğunda **cüzdanda yeni imza gerekmez**: `POST /auth/refresh`.
   401 köprüsü (`registerAuthBridge`) önce bunu dener, başarısızsa oturumu kapatır.
 - Mesaj imzalayan cüzdanlar için alternatif: `POST /auth/nonce` → `POST /auth/verify`
@@ -36,18 +40,22 @@ POST /api/v1/auth/sep10  { transaction } → { token, expires_at, public_key, re
 | Ekran | Uçlar |
 |---|---|
 | Giriş | `GET /config`, `GET/POST /auth/sep10`, `GET /auth/me`, `POST /auth/refresh` |
-| Kayıt | `POST /users/register` (RegisterIn: customer / trader blokları) |
-| Keşfet (iki rol) | `GET /discover`, `POST /discover/{target_type}/{target_id}/action` (`pass`/`like`/`save`/`follow`/`offer_request`) |
-| Teklif Ver | `POST /offers` (OfferCreateIn: amount, duration_days, commission_bps…) |
-| Takip | `POST/DELETE /traders/{id}/follow` |
-| Panel | `GET /dashboard` |
-| Hareketler | `GET /activity` |
-| İlanlarım | `GET /listings/mine`, `/listings/mine/counts`, `/listings/saved` |
-| Sözleşme | `GET /agreements/{id}`, `POST /agreements/{id}/tx/{action}` → imza → `POST /tx/submit` |
-| Mesajlar | `GET /conversations`, `/conversations/{id}/messages` |
-| Bildirimler | `GET /notifications`, `POST /notifications/read`, `PUT /notifications/push-token` |
-| Cüzdan | `GET /wallet`, `POST /wallet/tx/payment`, `/wallet/tx/trustline` |
-| Anchor | `GET /anchor/info`, `POST /anchor/deposit|withdraw`, `GET /anchor/transactions` |
+| Kayıt | `POST /users/register` → **`RegisterOut`**: profil **ve rolü taşıyan yeni token** |
+| Keşfet (iki rol) | `GET /discover`, `POST /discover/{target_type}/{target_id}/action` |
+| Teklif Ver | `POST /offers`; kabul/ret `POST /offers/{id}/accept|reject|withdraw` |
+| Panel (iki rol) | `GET /dashboard` — rol'e göre `TraderDashboardOut` ya da `CustomerDashboardOut` |
+| Hareketler | `GET /activity` (`trader_id`, `state=open|closed`) |
+| İlanlarım | `GET /listings/mine`, `/listings/mine/counts`; `POST /listings/{id}/pause|resume|close` |
+| İlan Detayı | `GET /listings/{id}` (`ListingDetailOut`), `GET /offers?listing_id=` |
+| İlan Oluştur | `POST /listings` (`ListingCreateIn`), `GET /assets?base_only=true` |
+| Sözleşme | `GET /agreements/{id}`, `/value-history`, `/trades`; `POST /agreements/{id}/tx/{action}` → imza → `POST /tx/submit` |
+| Yeni İşlem | `GET /agreements/{id}/quote` (imzadan önce drawdown kontrolü) → `POST /agreements/{id}/tx/trade` |
+| Trader Profili | `GET /traders/{id}/profile` (`range`, `trades`), `POST|DELETE /traders/{id}/follow` |
+| Mesajlar | `GET /conversations`, `/conversations/{id}/messages`, `POST .../messages`, `POST .../read` |
+| Bildirimler | `GET /notifications`, `/unread-count`, `POST /notifications/read`, `PUT /notifications/push-token` |
+| Profil | `GET /users/me`, `PATCH /users/me` |
+| Cüzdan | `GET /wallet?movements=true`, `/wallet/deposit-info`, `POST /wallet/tx/payment|trustline` |
+| Anchor | `GET /anchor/info`, `POST /anchor/deposit|withdraw`, `GET /anchor/transactions`, `POST /anchor/transactions/{ref}/tx/payment` |
 
 ## Zincir üstü işlemler
 
@@ -62,3 +70,39 @@ GET  /api/v1/tx/{pending_id}                → durum takibi
 
 Gizli anahtar hiçbir adımda sunucuya gitmez. Vault kontrat kimliği ve ağ
 ayarları `GET /config` içinde (`vault_contract_id`, `soroban_rpc_url`, `network_passphrase`).
+
+
+## Tipler nereden geliyor
+
+`src/lib/api/schema.ts` **elle yazılmaz**, sunucunun OpenAPI şemasından üretilir:
+
+```bash
+cd app && npm run gen:api     # /openapi.json indirir, 98 tipi üretir
+npm run typecheck             # sözleşme değiştiyse burada patlar
+```
+
+`types.ts` yalnızca bu dosyayı yeniden dışa aktarır; `endpoints.ts` ise yol ve
+sorgu parametrelerini bağlar. Sunucu şeması değişince derleyici uyumsuz çağrı
+yerlerini tek tek gösterir — elle yazılan tiplerde bu emniyet yoktu ve
+`markets` / `*_bps` alanlarının aslında opsiyonel olduğu ancak üretime geçince
+görüldü.
+
+**Sayfalama offset tabanlıdır** (`limit` / `offset`, yanıt `Page<T>` =
+`{ items, total, limit, offset }`). Tek istisna `GET /discover`: o uç cursor
+kullanır.
+
+## Zincir üstü akışın tek motoru
+
+Bütün imza gerektiren işler `src/lib/onchain.ts` içindeki `useOnchainAction`
+üzerinden geçer:
+
+```
+sunucu XDR üretir (UnsignedTxOut)
+  → wallet.signTransaction(unsigned_xdr, { networkPassphrase, address: source })
+  → POST /tx/submit { xdr, pending_id } → TxSubmitOut
+```
+
+Hangi adımın mümkün olduğunu **sunucu** söyler (`agreement.available_actions`);
+arayüz kendi başına varsaymaz. Kullanılan yerler: sözleşme adımları
+(`open` / `propose` / `fund` / `accept` / `settle` / `cancel`), yeni işlem
+(`/tx/trade`), cüzdan trustline'ı ve anchor çekim ödemesi.

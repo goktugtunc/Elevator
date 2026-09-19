@@ -41,35 +41,41 @@
 ## Görevler
 
 Öncelik = gelistirme-notlari §4.5 sırası. Tahmin: S ≤ ½ gün · M ≈ 1 gün · L ≈ 2 gün.
-**Durum:** ✅ bitti · 🟡 istemci tarafı bitti, backend ucu bekleniyor · ⬜ başlanmadı.
+**Durum:** ✅ bitti · 🟡 kod hazır, gerçek cihazda/uçtan uca doğrulanmadı · ⬜ başlanmadı.
+
+> **Bağımlılık sütunu artık geçersiz.** Sunucunun 92 ucunun tamamı canlı
+> (`mobilback.yolalapp.com`), bu yüzden tabloda yazan `BE-*` bağımlılıkları
+> düştü ve bekleyen tüm FE görevleri yazıldı. Sütun tarihsel kayıt olarak duruyor.
 
 | ID | Görev | Figma | Tahmin | Bağımlılık | Sahip | Durum |
 |---|---|---|---|---|---|---|
 | FE-01 | ~~Proje kurulumu, tema, UI kit, navigasyon iskeleti~~ | DS 0:1 | L | — | Claude | ✅ |
 | FE-02 | ~~Onboarding + Giriş (cüzdan) + Rol Seçimi~~ | 19:13 · 19:109 · 19:181 | M | — | Claude | ✅ |
-| FE-03 | Kayıt · Bilgiler formu (Müşteri / Trader varyantı) → `POST /users/register` | 19:269 · 19:353 | M | — | Claude | 🟡 |
-| FE-04 | SEP-10 girişi (`/auth/sep10`), `/auth/refresh` ile 401 yenileme, hata mesajları | 19:109 | S | — | Claude | 🟡 |
-| FE-05 | Keşfet · Müşteri deck → `GET /discover` + `POST /discover/.../action` | 21:30 · 21:282 | L | — | Claude | 🟡 |
-| FE-06 | Keşfet · Trader + "Teklif Ver" sheet → `POST /offers` | 21:160 · 21:414 | M | — | Claude | 🟡 |
+| FE-03 | Kayıt · Bilgiler formu (Müşteri / Trader varyantı) → `POST /users/register` | 19:269 · 19:353 | M | — | Claude | ✅ |
+| FE-04 | SEP-10 girişi (`/auth/sep10`), `/auth/refresh` ile 401 yenileme, hata mesajları | 19:109 | S | — | Claude | ✅ |
+| FE-05 | Keşfet · Müşteri deck → `GET /discover` + `POST /discover/.../action` | 21:30 · 21:282 | L | — | Claude | ✅ |
+| FE-06 | Keşfet · Trader + "Teklif Ver" sheet → `POST /offers` | 21:160 · 21:414 | M | — | Claude | ✅ |
 | FE-07 | ~~Bottom Sheet + Switch + Progress ortak bileşenleri~~ | 23:181 · 30:536 | S | — | Claude | ✅ |
-| FE-08 | Mesajlar listesi + Sohbet ekranı | 28:171 · 28:266 | M | BE-04 | | ⬜ |
-| FE-09 | Sözleşme ekranı + "Onaylamak için kaydır" → escrow kontrat çağrısı (bindings, simulate, imza, `POST /tx/submit`), işlem durumu UI'ı | 28:320 | L | BE-05, BE-06 | | ⬜ |
-| FE-10 | Panel · Müşteri (portföy KPI + sparkline, takip listesi, ilan etkileşimleri) | 30:97 | M | BE-03, BE-07 | | ⬜ |
-| FE-11 | Panel · Trader (profil tamamlama, bekleyen teklifler, aktif yatırımcılar) | 23:362 | M | BE-03, BE-07 | | ⬜ |
-| FE-12 | Hareketler · birleşik akış + trader bazlı görünüm + "Görünümü Düzenle" sheet | 30:252 · 30:375 · 30:536 | M | BE-08 | | ⬜ |
+| FE-08 | Mesajlar listesi + Sohbet ekranı | 28:171 · 28:266 | M | BE-04 | Claude | ✅ |
+| FE-09 | Sözleşme ekranı + "Onaylamak için kaydır" → escrow kontrat çağrısı (bindings, simulate, imza, `POST /tx/submit`), işlem durumu UI'ı | 28:320 | L | BE-05, BE-06 | Claude | ✅ |
+| FE-10 | Panel · Müşteri (portföy KPI + sparkline, takip listesi, ilan etkileşimleri) | 30:97 | M | BE-03, BE-07 | Claude | ✅ |
+| FE-11 | Panel · Trader (profil tamamlama, bekleyen teklifler, aktif yatırımcılar) | 23:362 | M | BE-03, BE-07 | Claude | ✅ |
+| FE-12 | Hareketler · birleşik akış + trader bazlı görünüm + "Görünümü Düzenle" sheet | 30:252 · 30:375 · 30:536 | M | BE-08 | Claude | ✅ |
 | FE-13 | Mobil cüzdan: uygulama içi cüzdan (cihazda anahtar) + SEP-7 harici cüzdan; WalletConnect isteğe bağlı | — | M | BE-02 (SEP-7 uçları) | Claude | 🟡 |
-| FE-14 | İşlemler · Trader (K/Z başlığı, açık/geçmiş) + "Yeni İşlem" sheet → `tradesApi.create` | 23:45 · 23:181 | M | BE-08 | | ⬜ |
-| FE-15 | İlanlarım (iki rol) + İlan Detayı (teklifler/talepler/ilgi sekmeleri) | 26:58 · 26:203 · 26:345 · 26:462 | M | BE-03 | | ⬜ |
-| FE-16 | İlan Oluştur sihirbazı (4 adım; risk profili adımı Figma'da) → `listingsApi.create` + zincir üstü ilan kaydı | 28:106 | M | BE-05 | | ⬜ |
-| FE-17 | Trader Profili (KPI grid, performans segmented + sparkline, canlı hareketler, strateji, yorumlar) | 22:171 | M | BE-03, BE-08 | | ⬜ |
-| FE-18 | Profil (iki rol) + Cüzdan (Horizon bakiye, TRY Yatır/Çek → SEP-24 interactive URL `expo-web-browser`, durum sorgusu, son işlemler) | 27:436 · 27:569 · 27:699 | L | BE-09 | | ⬜ |
-| FE-19 | Bildirimler (liste, gruplar, tümünü oku, boş durum) | 27:96 · 27:240 · 27:371 | S | BE-10 | | ⬜ |
+| FE-14 | İşlemler · Trader (K/Z başlığı, açık/geçmiş) + "Yeni İşlem" sheet → `tradesApi.create` | 23:45 · 23:181 | M | BE-08 | Claude | ✅ |
+| FE-15 | İlanlarım (iki rol) + İlan Detayı (teklifler/talepler/ilgi sekmeleri) | 26:58 · 26:203 · 26:345 · 26:462 | M | BE-03 | Claude | ✅ |
+| FE-16 | İlan Oluştur sihirbazı (4 adım; risk profili adımı Figma'da) → `listingsApi.create` + zincir üstü ilan kaydı | 28:106 | M | BE-05 | Claude | ✅ |
+| FE-17 | Trader Profili (KPI grid, performans segmented + sparkline, canlı hareketler, strateji, yorumlar) | 22:171 | M | BE-03, BE-08 | Claude | ✅ |
+| FE-18 | Profil (iki rol) + Cüzdan (Horizon bakiye, TRY Yatır/Çek → SEP-24 interactive URL `expo-web-browser`, durum sorgusu, son işlemler) | 27:436 · 27:569 · 27:699 | L | BE-09 | Claude | ✅ |
+| FE-19 | Bildirimler (liste, gruplar, tümünü oku, boş durum) | 27:96 · 27:240 · 27:371 | S | BE-10 | Claude | ✅ |
 | FE-20 | ~~Sparkline bileşeni (react-native-svg) — Panel, Keşfet kartı, Trader Profili~~ | — | S | — | Claude | ✅ |
 | FE-21 | Web deploy (Vercel / Netlify / EAS Hosting — karar §8.15) + `.env` production değerleri + herkese açık URL | — | S | BE-05 | | ⬜ |
 | FE-22 | README: kurulum, test adımları, ekran görüntüleri, Stellar entegrasyon listesi; Mermaid diyagramı güncel | — | S | — | | ⬜ |
 | FE-23 | Uçtan uca demo provası: giriş → ilan → yatırma → sözleşme → ödeme → çekim (Testnet, gerçek veri) | — | M | tüm BE-* | | ⬜ |
 
-Backend beklemeden ilerletilebilecek işler: **FE-12 / FE-14** (FE-07 bileşenleri hazır), **FE-13**, ve FE-15–FE-19'un UI katmanı.
+**Kalan iş:** FE-21 (web deploy — platform kararı §8.15), FE-22 (README ekran
+görüntüleri), FE-23 (uçtan uca demo provası). Ekranların tamamı yazıldı;
+placeholder ekran kalmadı.
 
 ## Yapılanların özeti (commit sırası)
 
@@ -80,6 +86,10 @@ Backend beklemeden ilerletilebilecek işler: **FE-12 / FE-14** (FE-07 bileşenle
 | `FE-04` | `assertValidChallenge` (sequence 0, zaman aralığı, istemci `manageData`, passphrase), `lib/auth/jwt.ts` (`exp` + 30 sn pay), 401 köprüsüyle tek seferlik SEP-10 yenileme, `lib/errors.ts` tek hata metni kaynağı |
 | `FE-05 + FE-20` | `SwipeDeck`, `ServiceListingCard`, `Sparkline`; Keşfet · Müşteri `GET /listings?kind=service`'e bağlı |
 | `FE-06 + FE-07` | `BottomSheet`, `Switch`, `Progress`; `CapitalListingCard`, `OfferSheet`; Keşfet · Trader `GET /listings?kind=capital` + `POST /listings/:id/offers`; API `/api/v1` önekine taşındı, Giriş'e sunucu durumu göstergesi |
+| `API tipleri üretiliyor` | `POST /users/register` yanıtı `RegisterOut` çıktı (kayıt sonrası sonsuz rol seçimi döngüsünün sebebi); `scripts/gen-api-types.py` ile 98 tip OpenAPI'den üretiliyor, `endpoints.ts` gerçek sözleşmeye göre yazıldı (offset sayfalama, `box`, boolean sorgu) |
+| `FE-10/11/15/16` | İki rolün paneli, İlanlarım (ortak bileşen), İlan Detayı, dört adımlı İlan Oluştur sihirbazı; `AsyncBoundary` / `EmptyState` ile ortak yükleniyor-hata-boş durumları |
+| `FE-09/12/14` | `lib/onchain.ts` (XDR → cüzdan imzası → `/tx/submit` tek motoru), `SlideToConfirm`, Sözleşme ekranı, Yeni İşlem sheet'i (imzadan önce `/quote` ile drawdown kontrolü), Hareketler akışı ve "Görünümü Düzenle" |
+| `FE-08/17/18/19` | Mesajlar + Sohbet, Trader Profili, Cüzdan (SEP-24 yatır/çek, trustline, Friendbot), Bildirimler; `HeaderActions` ile sekmelerden erişim. Placeholder ekran kalmadı |
 
 **FE-13 notu (🟡):** Mobil cüzdan artık **üçüncü taraf servise bağlı değil**. Üç yol var, ilki varsayılan:
 
@@ -108,12 +118,13 @@ Tüm uçlar canlı (92). Frontend'in kullandığı gruplar:
 | Keşfet | `/discover`, `/discover/.../action` | ✅ |
 | Teklifler | `/offers*` | ✅ (oluşturma) |
 | Trader | `/traders*` | ✅ (takip) |
-| Panel · Hareketler | `/dashboard`, `/activity` | ⬜ FE-10/11/12 |
-| İlanlar | `/listings*` | ⬜ FE-15/16 |
-| Sözleşme | `/agreements*`, `/tx/submit` | ⬜ FE-09 |
-| Mesajlar | `/conversations*` | ⬜ FE-08 |
-| Bildirim | `/notifications*` | ⬜ FE-19 |
-| Cüzdan · Anchor | `/wallet*`, `/anchor*` | ⬜ FE-18 |
+| Panel · Hareketler | `/dashboard`, `/activity` | ✅ |
+| İlanlar | `/listings*` | ✅ |
+| Sözleşme | `/agreements*`, `/tx/submit`, `/quote` | ✅ |
+| Mesajlar | `/conversations*` | ✅ |
+| Bildirim | `/notifications*` | ✅ (push token hariç) |
+| Cüzdan · Anchor | `/wallet*`, `/anchor*` | ✅ |
+| Kur | `/fx`, `/fx/convert` | ✅ (cüzdan ve sözleşme TL karşılıkları) |
 
 ## Riskler ve kararlar
 

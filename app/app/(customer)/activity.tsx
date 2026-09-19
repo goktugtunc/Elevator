@@ -3,7 +3,13 @@ import { ExternalLink, SlidersHorizontal } from 'lucide-react-native';
 import { useMemo, useState } from 'react';
 import { Linking, StyleSheet, View } from 'react-native';
 
-import { AsyncBoundary, EmptyState, Screen, ScreenHeader } from '@/components/layout';
+import {
+  AsyncBoundary,
+  EmptyState,
+  HeaderActions,
+  Screen,
+  ScreenHeader,
+} from '@/components/layout';
 import {
   BottomSheet,
   Button,
@@ -63,13 +69,16 @@ export default function CustomerActivity() {
         title="Activity"
         subtitle="Every move by the traders you follow or invest with"
         right={
-          <Button
-            title={activeFilters ? `Filters (${activeFilters})` : 'Filters'}
-            variant="secondary"
-            size="sm"
-            onPress={() => setSheetOpen(true)}
-            leftIcon={<SlidersHorizontal size={15} color={colors.navy900} />}
-          />
+          <View style={styles.headerActions}>
+            <HeaderActions />
+            <Button
+              title={activeFilters ? `Filters (${activeFilters})` : 'Filters'}
+              variant="secondary"
+              size="sm"
+              onPress={() => setSheetOpen(true)}
+              leftIcon={<SlidersHorizontal size={15} color={colors.navy900} />}
+            />
+          </View>
         }
       />
       <View style={styles.body}>
@@ -184,6 +193,7 @@ function ActivityRow({ item }: { item: ActivityItemOut }) {
 
 const styles = StyleSheet.create({
   body: { paddingHorizontal: spacing.lg, paddingBottom: spacing['2xl'], gap: spacing.md },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   card: { paddingVertical: 0 },
   sheet: { gap: spacing.lg },
   group: { gap: spacing.sm },

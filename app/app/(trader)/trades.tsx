@@ -4,7 +4,13 @@ import { ExternalLink, Plus } from 'lucide-react-native';
 import { useState } from 'react';
 import { Linking, StyleSheet, View } from 'react-native';
 
-import { AsyncBoundary, EmptyState, Screen, ScreenHeader } from '@/components/layout';
+import {
+  AsyncBoundary,
+  EmptyState,
+  HeaderActions,
+  Screen,
+  ScreenHeader,
+} from '@/components/layout';
 import { NewTradeSheet } from '@/components/trades';
 import { Button, Card, KpiBox, ListRow, Segmented, StatusChip, Text } from '@/components/ui';
 import { activityApi, agreementsApi, dashboardApi } from '@/lib/api';
@@ -45,7 +51,9 @@ export default function TraderTrades() {
 
   return (
     <Screen riskStrip={false} padded={false}>
-      <ScreenHeader title="Trades" subtitle="Capital you manage and every trade you opened" />
+      <ScreenHeader title="Trades" subtitle="Capital you manage and every trade you opened"
+        right={<HeaderActions />}
+      />
       <View style={styles.body}>
         {dash.data ? (
           <View style={styles.kpis}>
