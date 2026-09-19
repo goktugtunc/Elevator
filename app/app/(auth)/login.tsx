@@ -5,18 +5,18 @@ import { ActivityIndicator, Platform, StyleSheet, View } from 'react-native';
 
 import { Screen } from '@/components/layout';
 import { Button, Card, Pill, Text } from '@/components/ui';
-import { WalletConnectSheet } from '@/components/wallet';
+import { WalletChooserSheet, WalletConnectSheet } from '@/components/wallet';
 import { metaApi } from '@/lib/api';
 import { networkLabel, userMessage } from '@/lib/errors';
 import { stellarConfig } from '@/lib/stellar';
-import { wallet } from '@/lib/wallet';
 import { useSession } from '@/store/session';
 import { colors, radius, spacing } from '@/theme';
 
 /**
  * Figma 1d · Giriş · Cüzdan ile (node 19:109)
  * Tasarımdaki MetaMask/Coinbase/Trust listesi Stellar'a uyarlandı (notlar §4.2):
- * web'de Stellar Wallets Kit modalı, mobilde WalletConnect v2 (FE-13).
+ * web'de Stellar Wallets Kit modalı, mobilde kendi cüzdan seçim ekranımız:
+ * uygulama içi cüzdan · SEP-7 ile harici cüzdan · (varsa) WalletConnect (FE-13).
  *
  * FE-04: SEP-10 hataları (yanlış ağ, reddedilen imza, sunucuya ulaşılamadı) ve
  * oturum süresi dolduğunda store'dan gelen uyarı burada gösterilir.
@@ -30,6 +30,7 @@ export default function Login() {
   const cancelPairing = useSession((s) => s.cancelPairing);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [chooserOpen, setChooserOpen] = useState(false);
 
   // Sunucu ayakta mı ve aynı ağda mı? (FE-04 — giriş denemeden önce görülür.)
   const backend = useQuery({
@@ -42,7 +43,8 @@ export default function Login() {
     backend.data !== undefined &&
     backend.data.network_passphrase !== stellarConfig.networkPassphrase;
 
-  const onConnect = async () => {
+  /** Cüzdan hazır → SEP-10 ile giriş. SEP-7 yolunda giriş zaten tamamlanmıştır. */
+  const finishSignIn = async () => {
     setBusy(true);
     setError(null);
     clearError();
@@ -56,9 +58,29 @@ export default function Login() {
     }
   };
 
+  const onConnect = () => {
+    setError(null);
+    clearError();
+    // Web'de cüzdan seçimini Wallets Kit modalı yapar; mobilde kendi seçim ekranımız.
+    if (Platform.OS === 'web') {
+      void finishSignIn();
+      return;
+    }
+    setChooserOpen(true);
+  };
+
+  const onWalletReady = () => {
+    setChooserOpen(false);
+    if (useSession.getState().status === 'signed_in') {
+      router.replace('/');
+      return;
+    }
+    void finishSignIn();
+  };
+
   const notice = error ?? sessionError;
   const connectLabel =
-    Platform.OS === 'web' ? 'Connect wallet (Freighter, xBull, Albedo…)' : 'Connect wallet';
+    Platform.OS === 'web' ? 'Connect wallet (Freighter, xBull, Albedo…)' : 'Set up your wallet';
 
   return (
     <Screen contentStyle={styles.content}>
@@ -96,21 +118,11 @@ export default function Login() {
       </View>
 
       <Card style={styles.card}>
-        {wallet.available ? (
-          <Button title={connectLabel} onPress={onConnect} loading={busy} fullWidth />
-        ) : (
-          <>
-            <Text variant="bodyStrong">Wallet connection needs setup</Text>
-            <Text variant="caption" color="text2">
-              Mobile sign-in uses WalletConnect. Add EXPO_PUBLIC_WALLETCONNECT_PROJECT_ID to your
-              .env file (free project ID at cloud.reown.com) and restart the app.
-            </Text>
-          </>
-        )}
+        <Button title={connectLabel} onPress={onConnect} loading={busy} fullWidth />
         <Text variant="caption" color="text3">
           {Platform.OS === 'web'
             ? `No Freighter yet? Get it at freighter.app — and switch it to ${networkLabel()}.`
-            : `Works with Lobstr and xBull. Switch your wallet to ${networkLabel()} first.`}
+            : `Create a wallet on this device, or sign with Lobstr / xBull on ${networkLabel()}.`}
         </Text>
       </Card>
 
@@ -138,6 +150,11 @@ export default function Login() {
         />
       </View>
 
+      <WalletChooserSheet
+        visible={chooserOpen}
+        onClose={() => setChooserOpen(false)}
+        onConnected={onWalletReady}
+      />
       <WalletConnectSheet uri={pairingUri} onClose={cancelPairing} />
     </Screen>
   );

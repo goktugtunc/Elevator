@@ -8,9 +8,10 @@ Bu yüzden development build gerekmez.
 
 | Gereken | Neden | Durum |
 |---|---|---|
-| `EXPO_PUBLIC_WALLETCONNECT_PROJECT_ID` | WalletConnect eşleşmesi bu kimlik olmadan başlamaz | ⬜ doldurulmalı — ücretsiz: <https://cloud.reown.com> |
+| — | Uygulama içi cüzdan hiçbir dış servis istemez | ✅ zorunlu ön koşul yok |
+| `EXPO_PUBLIC_WALLETCONNECT_PROJECT_ID` | Yalnızca WalletConnect seçeneği için; boşsa o seçenek görünmez | ⬜ isteğe bağlı |
 | Xcode (App Store) | Yalnızca simülatör için gerekir; Expo Go yolu Xcode istemez | ⬜ bu makinede yalnızca Command Line Tools var |
-| Lobstr ya da xBull (telefonda) | İmzayı gerçek cüzdan atar | ⬜ |
+| Lobstr ya da xBull (telefonda) | Yalnızca SEP-7 yolu için; uygulama içi cüzdanda gerekmez | ⬜ |
 | Expo Go (telefonda) | Uygulamayı derlemeden çalıştırır | ⬜ App Store / Play Store |
 
 Kontrol:
@@ -33,9 +34,14 @@ npx expo start            # terminalde QR çıkar
 - Android: Expo Go → "Scan QR code".
 - Elle adres: `exp://<Mac-IP>:8081` (ör. `exp://192.168.1.29:8081`).
 
-Cüzdan bağlantısı burada tam çalışır: "Connect wallet" → "Open in Lobstr/xBull"
-telefondaki cüzdanı açar, onaydan sonra Expo Go'ya döner (dönüş adresi
-`Linking.createURL('/')` ile Expo Go'ya göre üretilir).
+"Set up your wallet" üç seçenek sunar:
+
+1. **In-app wallet** — anahtar cihazda üretilir, güvenli depoda kalır, imza cihazda
+   atılır. Dış uygulama gerekmez; demo için en güvenilir yol.
+2. **Import a key** — elindeki Testnet gizli anahtarını (S…) içe aktarır.
+3. **External wallet (SEP-7)** — adresini gir, Lobstr/xBull açılır, imzalı XDR
+   doğrudan backend'e gider, uygulama sonucu bekler. `/auth/sep7-*` uçları
+   açılınca çalışır (bkz. [backend-sozlesme.md](backend-sozlesme.md)).
 
 ## 2. Xcode kurulumu (isteğe bağlı, simülatör için)
 

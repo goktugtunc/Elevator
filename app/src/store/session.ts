@@ -1,10 +1,11 @@
 import { create } from 'zustand';
 
 import { profileApi, registerAuthBridge, type RegisterPayload } from '@/lib/api';
-import { isExpired, loginWithSep10 } from '@/lib/auth';
+import { isExpired, loginWithSep10, startSep7SignIn, waitForSep7 } from '@/lib/auth';
 import { userMessage } from '@/lib/errors';
 import { STORAGE_KEYS, plainStorage, secureStorage } from '@/lib/storage';
-import { wallet } from '@/lib/wallet';
+import { localWallet, restoreWalletMode, wallet } from '@/lib/wallet';
+import type { NativeWalletMode } from '@/lib/wallet';
 import type { Role, UserProfile } from '@/types';
 
 /**
@@ -17,6 +18,9 @@ import type { Role, UserProfile } from '@/types';
  */
 export type SessionStatus = 'booting' | 'signed_out' | 'wallet_connected' | 'signed_in';
 
+/** İmza yolu. `sep7` imzayı cihazda üretmez; cüzdan imzalı XDR'ı backend'e gönderir. */
+export type WalletMode = NativeWalletMode | 'sep7';
+
 interface SessionState {
   status: SessionStatus;
   address: string | null;
@@ -26,13 +30,21 @@ interface SessionState {
   expiresAt: number | null;
   /** Mobilde WalletConnect eşleşme URI'si — UI QR/deep link gösterir. */
   pairingUri: string | null;
+  /** Hangi imza yolu kullanılıyor: uygulama içi cüzdan, WalletConnect ya da SEP-7. */
+  walletMode: WalletMode | null;
   onboardingSeen: boolean;
   error: string | null;
 
   hydrate: () => Promise<void>;
   markOnboardingSeen: () => Promise<void>;
-  connectWallet: () => Promise<string>;
+  connectWallet: (mode?: NativeWalletMode) => Promise<string>;
   cancelPairing: () => void;
+  /** Uygulama içi cüzdan: var olanı yükler, yoksa üretir. */
+  useLocalWallet: () => Promise<string>;
+  /** Var olan gizli anahtarı içe aktarır (S…). */
+  importLocalWallet: (secret: string) => Promise<string>;
+  /** SEP-7: challenge'ı harici cüzdanda imzalatır, sonucu bekler. */
+  signInWithSep7: (address: string, isCancelled?: () => boolean) => Promise<void>;
   signIn: () => Promise<void>;
   /** Kayıt: rol + form → backend; başarılıysa profile/rol set edilir. */
   register: (payload: RegisterPayload) => Promise<void>;
@@ -64,6 +76,7 @@ export const useSession = create<SessionState>((set, get) => ({
   profile: null,
   expiresAt: null,
   pairingUri: null,
+  walletMode: null,
   onboardingSeen: false,
   error: null,
 
@@ -75,6 +88,7 @@ export const useSession = create<SessionState>((set, get) => ({
     ]);
     const persisted = raw ? (JSON.parse(raw) as PersistedSession) : null;
     const onboardingSeen = !!seen;
+    set({ walletMode: await restoreWalletMode() });
 
     if (!jwt || !persisted) {
       set({ status: 'signed_out', onboardingSeen });
@@ -113,16 +127,50 @@ export const useSession = create<SessionState>((set, get) => ({
     set({ onboardingSeen: true });
   },
 
-  async connectWallet() {
+  async connectWallet(mode) {
     set({ error: null, pairingUri: null });
     try {
       const { address } = await wallet.connect({
+        mode,
         onUri: (uri) => set({ pairingUri: uri }),
       });
-      set({ address, status: 'wallet_connected', pairingUri: null });
+      set({
+        address,
+        status: 'wallet_connected',
+        pairingUri: null,
+        walletMode: mode ?? get().walletMode ?? 'local',
+      });
       return address;
     } catch (err) {
       set({ pairingUri: null });
+      throw err;
+    }
+  },
+
+  async useLocalWallet() {
+    const address = (await localWallet.address()) ?? (await localWallet.create());
+    set({ address, status: 'wallet_connected', walletMode: 'local', error: null });
+    return address;
+  },
+
+  async importLocalWallet(secret) {
+    const address = await localWallet.importSecret(secret);
+    set({ address, status: 'wallet_connected', walletMode: 'local', error: null });
+    return address;
+  },
+
+  async signInWithSep7(address, isCancelled) {
+    set({ error: null, address, walletMode: 'sep7' });
+    try {
+      const { requestId } = await startSep7SignIn(address);
+      const { token, expiresAt } = await waitForSep7(requestId, { isCancelled });
+      await secureStorage.set(STORAGE_KEYS.jwt, token);
+      const profile = await profileApi.me().catch(() => null);
+      const role = profile?.role ?? null;
+      await persist({ address, role, expiresAt });
+      set({ status: 'signed_in', profile, role, expiresAt });
+    } catch (err) {
+      set({ error: userMessage(err) });
       throw err;
     }
   },

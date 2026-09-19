@@ -9,6 +9,11 @@ export interface ConnectOptions {
    * için). Web adaptörü kendi modalını açtığından bunu kullanmaz.
    */
   onUri?: (uri: string) => void;
+  /**
+   * Native tarafta hangi imza yolu kullanılacak: uygulama içi cüzdan ya da
+   * WalletConnect. Verilmezse son seçilen yol sürer.
+   */
+  mode?: 'local' | 'walletconnect';
 }
 
 export interface WalletAdapter {

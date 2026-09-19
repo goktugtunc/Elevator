@@ -44,20 +44,37 @@ export const metaApi = {
   health: () => http.get<HealthStatus>('/health', undefined, false),
 };
 
-// --- Auth (SEP-10) ---
+// --- Auth (SEP-10 + SEP-7) ---
+
+/** `GET /auth/sep7-status/:id` yanıtı — cüzdan imzayı callback'e gönderene kadar `pending`. */
+export interface Sep7Status {
+  status: 'pending' | 'completed' | 'failed';
+  token?: string;
+  expiresAt?: string;
+  message?: string;
+}
+
 export const authApi = {
+  /**
+   * SEP-10 challenge. `id`, SEP-7 akışında imzayı callback üzerinden eşleştirmek
+   * için kullanılır (bkz. docs/backend-sozlesme.md).
+   */
   challenge: (address: string) =>
-    http.post<{ transaction: string; networkPassphrase: string }>(
+    http.post<{ transaction: string; networkPassphrase: string; id?: string }>(
       `${V1}/auth/challenge`,
       { account: address },
       false,
     ),
+  /** Cihazda imzalanan challenge (uygulama içi cüzdan, Freighter, WalletConnect). */
   verify: (signedTransaction: string) =>
     http.post<{ token: string; expiresAt?: string }>(
       `${V1}/auth/verify`,
       { transaction: signedTransaction },
       false,
     ),
+  /** SEP-7 akışında imzanın backend'e ulaşıp ulaşmadığını yoklar. */
+  sep7Status: (requestId: string) =>
+    http.get<Sep7Status>(`${V1}/auth/sep7-status/${requestId}`, undefined, false),
 };
 
 // --- Profil & kayıt ---

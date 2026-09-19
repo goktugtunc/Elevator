@@ -90,3 +90,17 @@ export const wallet: WalletAdapter = {
     }
   },
 };
+
+/**
+ * Native adaptörle aynı yüzey: web'de imza yolu Stellar Wallets Kit'tir,
+ * uygulama içi cüzdan ya da WalletConnect seçimi yoktur.
+ */
+export type NativeWalletMode = 'local' | 'walletconnect';
+
+export function walletConnectAvailable(): boolean {
+  return false;
+}
+
+export async function restoreWalletMode(): Promise<NativeWalletMode> {
+  return 'local';
+}

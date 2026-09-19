@@ -53,4 +53,8 @@ export const STORAGE_KEYS = {
   jwt: 'tk.jwt',
   session: 'tk.session',
   onboardingSeen: 'tk.onboardingSeen',
+  /** Uygulama içi cüzdanın gizli anahtarı — yalnızca secureStorage. */
+  walletSecret: 'tk.walletSecret',
+  /** Son seçilen cüzdan yöntemi (local | walletconnect | sep7). */
+  walletMode: 'tk.walletMode',
 } as const;
