@@ -141,7 +141,21 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 
 function mapError(err: unknown): WalletError {
   if (err instanceof WalletError) return err;
-  const msg = err instanceof Error ? err.message : String(err);
+  // Relay düz nesne fırlatıyor ({ code, message }); Error varsayımı mesajı yutuyordu.
+  const msg =
+    err instanceof Error
+      ? err.message
+      : err && typeof err === 'object' && typeof (err as { message?: unknown }).message === 'string'
+        ? (err as { message: string }).message
+        : String(err);
+  // Freighter kilitliyken isteği onay ekranı göstermeden reddediyor ve
+  // "User rejected. User not authenticated" diyor. Bunu "siz reddettiniz"
+  // diye göstermek yanıltıcı olur — yapılması gereken kilidi açmaktır.
+  if (/not authenticated|unlock|locked/i.test(msg))
+    return new WalletError(
+      'Your wallet is locked. Open Freighter, unlock it, then try connecting again.',
+      'NOT_CONNECTED',
+    );
   if (/reject|denied|cancel|closed/i.test(msg))
     return new WalletError('The request was rejected in your wallet.', 'USER_REJECTED');
   if (/chain|namespace|network/i.test(msg))
@@ -169,6 +183,17 @@ export const walletConnectWallet: WalletAdapter = {
         provider.abortPairingAttempt();
       } catch {
         /* bekleyen deneme yoksa sorun değil */
+      }
+
+      // Oturumu olmayan eski eşleşmeleri sil. Silinmezse SignClient bir sonraki
+      // connect() çağrısında **aynı eşleşmeyi geri kullanıyor**: cüzdana zaten
+      // harcanmış (reddedilmiş ya da süresi dolmuş) bir `wc:` URI'si gidiyor,
+      // Freighter açılıyor ama onay ekranı hiç çıkmıyor. Her denemede taze bir
+      // URI üretilmeli.
+      try {
+        await provider.cleanupPendingPairings({ deletePairings: true });
+      } catch (err) {
+        debugError('wallet:wc', 'eski eşleşmeler temizlenemedi', err);
       }
 
       // Zaten kurulu bir oturum varsa cüzdanı tekrar yormayalım.

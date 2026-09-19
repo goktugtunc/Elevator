@@ -20,11 +20,20 @@ import { STORAGE_KEYS, plainStorage } from '@/lib/storage';
 
 export type NativeWalletMode = 'local' | 'walletconnect';
 
-let mode: NativeWalletMode = 'local';
-
 export function walletConnectAvailable(): boolean {
   return Boolean(env.walletConnectProjectId);
 }
+
+/**
+ * Mobilde varsayılan yol WalletConnect'tir (Freighter yalnızca bunu destekler).
+ * Proje kimliği tanımlı değilse uygulama içi cüzdana düşülür — aksi hâlde
+ * kullanıcı hiç giriş yapamaz.
+ */
+function defaultMode(): NativeWalletMode {
+  return walletConnectAvailable() ? 'walletconnect' : 'local';
+}
+
+let mode: NativeWalletMode = defaultMode();
 
 /** Web'deki Freighter kısayolunun native karşılığı yok: mobilde Freighter WalletConnect ile gelir. */
 export const FREIGHTER_WALLET_ID = 'freighter';
@@ -35,7 +44,9 @@ export async function isFreighterAvailable(): Promise<boolean> {
 
 export async function restoreWalletMode(): Promise<NativeWalletMode> {
   const stored = await plainStorage.get(STORAGE_KEYS.walletMode);
-  mode = stored === 'walletconnect' && walletConnectAvailable() ? 'walletconnect' : 'local';
+  if (stored === 'walletconnect' && walletConnectAvailable()) mode = 'walletconnect';
+  else if (stored === 'local') mode = 'local';
+  else mode = defaultMode();
   return mode;
 }
 

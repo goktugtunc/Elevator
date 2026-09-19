@@ -6,7 +6,7 @@ import { ActivityIndicator, Platform, StyleSheet, View } from 'react-native';
 
 import { Screen } from '@/components/layout';
 import { Button, Card, Pill, Text } from '@/components/ui';
-import { WalletChooserSheet, WalletConnectSheet } from '@/components/wallet';
+import { WalletConnectSheet } from '@/components/wallet';
 import { metaApi } from '@/lib/api';
 import { networkLabel, userMessage } from '@/lib/errors';
 import { stellarConfig } from '@/lib/stellar';
@@ -34,7 +34,6 @@ export default function Login() {
   const resetAll = useSession((s) => s.resetAll);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [chooserOpen, setChooserOpen] = useState(false);
 
   // Sunucu ayakta mı ve aynı ağda mı? (FE-04 — giriş denemeden önce görülür.)
   const backend = useQuery({
@@ -87,10 +86,10 @@ export default function Login() {
   };
 
   /**
-   * Web: Wallets Kit modalı (Freighter, xBull, Albedo…).
-   * Mobil: cüzdan seçim sheet'i — uygulama içi cüzdan, anahtar içe aktarma ya da
-   * WalletConnect (Freighter/LOBSTR/xBull). Doğrudan WalletConnect'e gitmiyoruz:
-   * proje kimliği tanımlı değilse kullanıcı çıkmaza giriyordu.
+   * Web: Wallets Kit modalı (Freighter uzantısı, xBull, Albedo…).
+   * Mobil: doğrudan WalletConnect — Freighter mobil yalnızca bu yolu destekliyor
+   * (docs.freighter.app/mobile-walletconnect). QR ve "Open in Freighter" düğmesi
+   * `WalletConnectSheet` içinde çıkar; cüzdan onaylayınca SEP-10 girişi başlar.
    */
   const onConnect = async () => {
     setError(null);
@@ -99,18 +98,21 @@ export default function Login() {
       await finishSignIn();
       return;
     }
-    setChooserOpen(true);
-  };
-
-  /** Seçim sheet'i cüzdanı hazırladı → SEP-10 girişi. */
-  const onWalletReady = async () => {
-    setChooserOpen(false);
-    await finishSignIn();
+    setBusy(true);
+    try {
+      await connectWallet({ mode: 'walletconnect' });
+      await signIn();
+      router.replace('/');
+    } catch (err) {
+      setError(userMessage(err));
+    } finally {
+      setBusy(false);
+    }
   };
 
   const notice = error ?? sessionError;
   const connectLabel =
-    Platform.OS === 'web' ? 'Connect wallet (Freighter, xBull, Albedo…)' : 'Set up your wallet';
+    Platform.OS === 'web' ? 'Connect wallet (Freighter, xBull, Albedo…)' : 'Connect Freighter';
 
   return (
     <Screen contentStyle={styles.content}>
@@ -177,7 +179,7 @@ export default function Login() {
         <Text variant="caption" color="text3">
           {Platform.OS === 'web'
             ? `Set Freighter to ${networkLabel()} before signing in.`
-            : `In-app wallet, your own key, or Freighter/LOBSTR/xBull on ${networkLabel()}.`}
+            : `Opens Freighter over WalletConnect. Set it to ${networkLabel()} first.`}
         </Text>
       </Card>
 
@@ -217,11 +219,6 @@ export default function Login() {
         }}
       />
 
-      <WalletChooserSheet
-        visible={chooserOpen}
-        onClose={() => setChooserOpen(false)}
-        onConnected={onWalletReady}
-      />
       <WalletConnectSheet uri={pairingUri} onClose={cancelPairing} />
     </Screen>
   );
