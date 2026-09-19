@@ -7,6 +7,7 @@ import { isExpired, loginWithSep10 } from '@/lib/auth';
 import { userMessage } from '@/lib/errors';
 import { debugError, debugLog } from '@/lib/log';
 import { STORAGE_KEYS, plainStorage, secureStorage } from '@/lib/storage';
+import { unregisterPush } from '@/lib/push';
 import { localWallet, restoreWalletMode, wallet } from '@/lib/wallet';
 import type { NativeWalletMode } from '@/lib/wallet';
 
@@ -216,6 +217,8 @@ export const useSession = create<SessionState>((set, get) => ({
   },
 
   async signOut() {
+    // Token'ı düşürmek JWT ister; oturumu temizlemeden ÖNCE yapılmalı.
+    if (get().status === 'signed_in') await unregisterPush();
     await clearStoredSession();
     await wallet.disconnect().catch(() => undefined);
     set({
@@ -231,6 +234,7 @@ export const useSession = create<SessionState>((set, get) => ({
   },
 
   async resetAll() {
+    if (get().status === 'signed_in') await unregisterPush();
     await clearStoredSession();
     await wallet.disconnect().catch(() => undefined);
     // signOut'tan farkı: uygulama içi cüzdanın gizli anahtarı ve tercihler de gider,

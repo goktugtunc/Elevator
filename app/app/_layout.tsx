@@ -15,6 +15,7 @@ import { useEffect } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
+import { usePushNotifications } from '@/lib/usePushNotifications';
 import { colors } from '@/theme';
 import { useSession } from '@/store/session';
 
@@ -36,6 +37,8 @@ export default function RootLayout() {
   });
   const status = useSession((s) => s.status);
   const hydrate = useSession((s) => s.hydrate);
+
+  usePushNotifications();
 
   useEffect(() => {
     hydrate().catch(() => undefined);
