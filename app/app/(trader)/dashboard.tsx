@@ -20,6 +20,7 @@ import type {
 } from '@/lib/api/types';
 import { userMessage } from '@/lib/errors';
 import { formatAmount, formatBps, formatBpsSigned, formatRelative } from '@/lib/format';
+import { useRefetchOnFocus } from '@/lib/useRefetchOnFocus';
 import { isPast, useNow } from '@/lib/useNow';
 import { colors, pnlColor, radius, spacing } from '@/theme';
 
@@ -39,6 +40,8 @@ export default function TraderDashboard() {
     queryFn: dashboardApi.get,
     select: (d): TraderDashboardOut | null => (d.role === 'trader' ? d : null),
   });
+
+  useRefetchOnFocus(dash.refetch);
 
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: ['dashboard'] });

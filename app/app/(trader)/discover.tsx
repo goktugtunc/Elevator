@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Bookmark, Check, RotateCcw, X } from 'lucide-react-native';
 import { useCallback, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
@@ -23,6 +23,7 @@ import { colors, layout, radius, shadow, spacing } from '@/theme';
  * Teklif `POST /api/v1/offers` ile gönderilir.
  */
 export default function TraderDiscover() {
+  const qc = useQueryClient();
   const deckRef = useRef<SwipeDeckHandle>(null);
   const [top, setTop] = useState<DiscoverCardOut | null>(null);
   const [notice, setNotice] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
@@ -43,7 +44,11 @@ export default function TraderDiscover() {
   const save = useMutation({
     mutationFn: (card: DiscoverCardOut) =>
       discoverApi.action(card.target_type ?? 'listing', card.target_id, 'save'),
-    onSuccess: () => setNotice({ tone: 'ok', text: 'Listing saved.' }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['listings', 'saved'] });
+      void qc.invalidateQueries({ queryKey: ['dashboard'] });
+      setNotice({ tone: 'ok', text: 'Listing saved.' });
+    },
     onError: (err) => setNotice({ tone: 'error', text: userMessage(err) }),
   });
 
@@ -51,6 +56,8 @@ export default function TraderDiscover() {
     mutationFn: (draft: OfferCreateIn) => offersApi.create(draft),
     onSuccess: () => {
       setOfferTarget(null);
+      void qc.invalidateQueries({ queryKey: ['dashboard'] });
+      void qc.invalidateQueries({ queryKey: ['offers'] });
       setNotice({ tone: 'ok', text: 'Your offer was sent to the customer.' });
     },
   });

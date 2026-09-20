@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Check, Heart, RotateCcw, X } from 'lucide-react-native';
 import { useCallback, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
@@ -23,6 +23,7 @@ import { colors, layout, radius, shadow, spacing } from '@/theme';
  * Etkileşimler `POST /discover/{target_type}/{target_id}/action` ile kaydedilir.
  */
 export default function CustomerDiscover() {
+  const qc = useQueryClient();
   const deckRef = useRef<SwipeDeckHandle>(null);
   const [top, setTop] = useState<DiscoverCardOut | null>(null);
   const [notice, setNotice] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
@@ -47,6 +48,8 @@ export default function CustomerDiscover() {
     onSuccess: (_offer, draft) => {
       const card = offerTarget;
       setOfferTarget(null);
+      void qc.invalidateQueries({ queryKey: ['dashboard'] });
+      void qc.invalidateQueries({ queryKey: ['offers'] });
       setNotice({ tone: 'ok', text: 'Your offer was sent to the trader.' });
       if (card) {
         act.mutate({ card, action: 'offer_request' });
@@ -58,7 +61,12 @@ export default function CustomerDiscover() {
 
   const follow = useMutation({
     mutationFn: (card: DiscoverCardOut) => tradersApi.follow(card.listing.owner_id),
-    onSuccess: () => setNotice({ tone: 'ok', text: 'Trader added to your following list.' }),
+    onSuccess: () => {
+      // Panel takip listesini `GET /dashboard`'tan okuyor; tazelenmezse 15 sn'lik
+      // önbellek yüzünden takip edilen trader orada hiç görünmüyordu.
+      void qc.invalidateQueries({ queryKey: ['dashboard'] });
+      setNotice({ tone: 'ok', text: 'Trader added to your following list.' });
+    },
     onError: (err) => setNotice({ tone: 'error', text: userMessage(err) }),
   });
 

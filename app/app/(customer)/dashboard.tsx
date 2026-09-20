@@ -17,6 +17,7 @@ import type {
   PositionBriefOut,
 } from '@/lib/api/types';
 import { formatAmount, formatBps, formatBpsSigned } from '@/lib/format';
+import { useRefetchOnFocus } from '@/lib/useRefetchOnFocus';
 import { colors, pnlColor, spacing } from '@/theme';
 
 /**
@@ -32,6 +33,8 @@ export default function CustomerDashboard() {
     queryFn: dashboardApi.get,
     select: (d): CustomerDashboardOut | null => (d.role === 'customer' ? d : null),
   });
+
+  useRefetchOnFocus(dash.refetch);
 
   return (
     <Screen riskStrip={false} padded={false}>
