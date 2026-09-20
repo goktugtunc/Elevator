@@ -102,6 +102,10 @@ export default function Conversation() {
     <Screen padded={false} scroll={false}>
       <TopBar
         title={other?.display_name ?? 'Conversation'}
+        // Başlığa dokunmak karşı tarafın profilini açar; sohbetten kişiye
+        // gitmenin başka bir yolu yoktu.
+        onTitlePress={other ? () => router.push(`/user/${other.id}`) : undefined}
+        titleAccessibilityLabel={other ? `${other.display_name} — open profile` : undefined}
         right={
           conversation.data?.agreement_id ? (
             <Button

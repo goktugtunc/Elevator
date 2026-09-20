@@ -307,7 +307,13 @@ registerAuthBridge({
         return login.token;
       } catch (err) {
         debugError('auth', 'JWT yenilenemedi', err);
-        return null;
+        // `null` = "bu oturum bitti"; çağıran tarafı kullanıcıyı çıkışa atar.
+        // Bunu yalnızca sunucu token'ı reddettiğinde döndürürüz. Ağ kopması ya
+        // da 5xx geçicidir — dağıtım sırasındaki bir 502 yüzünden kullanıcı
+        // oturumundan edilmemeli, o yüzden hata yukarı fırlatılır.
+        const status = err instanceof ApiError ? err.status : 0;
+        if (status === 401 || status === 403) return null;
+        throw err;
       }
     })();
     try {

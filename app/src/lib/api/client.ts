@@ -97,9 +97,17 @@ async function request<T>(method: Method, path: string, options: RequestOptions 
   const data = text ? safeJson(text) : null;
 
   if (res.status === 401 && auth && !retried && authBridge) {
-    const token = await authBridge.refresh().catch(() => null);
+    let token: string | null = null;
+    let transient = false;
+    try {
+      token = await authBridge.refresh();
+    } catch {
+      // Yenileme ağ/sunucu hatası yüzünden yapılamadı; oturum hâlâ geçerli
+      // olabilir. Kullanıcıyı çıkarmak yerine 401'i olduğu gibi yüzeye veririz.
+      transient = true;
+    }
     if (token) return request<T>(method, path, { ...options, retried: true });
-    authBridge.onSessionExpired();
+    if (!transient) authBridge.onSessionExpired();
   }
 
   if (!res.ok) {

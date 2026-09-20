@@ -10,9 +10,13 @@ export interface TopBarProps {
   title: string;
   onBack?: () => void;
   right?: React.ReactNode;
+  /** Verilirse başlık dokunulabilir olur (ör. sohbette karşı tarafın profili). */
+  onTitlePress?: () => void;
+  /** Ekran okuyucuya başlığın ne yaptığını söyler; `onTitlePress` ile birlikte. */
+  titleAccessibilityLabel?: string;
 }
 
-export function TopBar({ title, onBack, right }: TopBarProps) {
+export function TopBar({ title, onBack, right, onTitlePress, titleAccessibilityLabel }: TopBarProps) {
   const router = useRouter();
   const goBack = onBack ?? (() => (router.canGoBack() ? router.back() : router.replace('/')));
   return (
@@ -26,9 +30,23 @@ export function TopBar({ title, onBack, right }: TopBarProps) {
       >
         <ArrowLeft size={22} color={colors.text} />
       </Pressable>
-      <Text variant="h2" style={styles.title} numberOfLines={1}>
-        {title}
-      </Text>
+      {onTitlePress ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={titleAccessibilityLabel ?? title}
+          onPress={onTitlePress}
+          style={styles.title}
+          hitSlop={8}
+        >
+          <Text variant="h2" numberOfLines={1}>
+            {title}
+          </Text>
+        </Pressable>
+      ) : (
+        <Text variant="h2" style={styles.title} numberOfLines={1}>
+          {title}
+        </Text>
+      )}
       <View style={styles.right}>{right}</View>
     </View>
   );
