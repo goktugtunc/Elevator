@@ -1,8 +1,8 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { ExternalLink } from 'lucide-react-native';
+import { ExternalLink, Star } from 'lucide-react-native';
 import { useState } from 'react';
-import { Linking, StyleSheet, View } from 'react-native';
+import { Linking, Pressable, StyleSheet, View } from 'react-native';
 
 import { AsyncBoundary, EmptyState, Screen, TopBar } from '@/components/layout';
 import {
@@ -207,6 +207,8 @@ export default function Contract() {
                       setTab('trades');
                     }}
                   />
+
+                  {a.status === 'settled' ? <RatingCard agreement={a} /> : null}
 
                   <TxLinks agreement={a} />
                 </>
@@ -652,6 +654,122 @@ function Row({ label, value }: { label: string; value: string }) {
   );
 }
 
+/**
+ * Kapanan anlaşmanın puanlanması.
+ *
+ * Sunucu kuralları: yalnızca **müşteri** puanlar, yalnızca **kapanmış**
+ * anlaşma puanlanır ve anlaşma başına **tek** puan verilir. Arayüz de aynı
+ * kısıtları gösterir; trader kendi aldığı puanı okur, veremez.
+ */
+function RatingCard({ agreement: a }: { agreement: AgreementOut }) {
+  const qc = useQueryClient();
+  const [score, setScore] = useState(0);
+  const [comment, setComment] = useState('');
+
+  const existing = useQuery({
+    queryKey: ['agreement', a.id, 'rating'],
+    queryFn: () => agreementsApi.rating(a.id),
+    // Puan yoksa sunucu 404 veriyor; bu bir hata değil, "henüz puanlanmadı".
+    retry: false,
+  });
+
+  const rate = useMutation({
+    mutationFn: () => agreementsApi.rate(a.id, { score, comment: comment.trim() || null }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['agreement', a.id, 'rating'] });
+      void qc.invalidateQueries({ queryKey: ['dashboard'] });
+      void qc.invalidateQueries({ queryKey: ['traders'] });
+    },
+  });
+
+  const given = existing.data ?? rate.data?.rating ?? null;
+
+  if (given) {
+    return (
+      <Card style={styles.rating}>
+        <Text variant="h2">Rating</Text>
+        <Stars value={given.score} />
+        {given.comment ? (
+          <Text variant="body" color="text2">
+            {given.comment}
+          </Text>
+        ) : null}
+        <Text variant="caption" color="text3">
+          {given.customer_display_name ?? given.customer_username ?? 'The customer'} ·{' '}
+          {formatRelative(given.created_at)}
+        </Text>
+      </Card>
+    );
+  }
+
+  if (a.my_role !== 'customer') {
+    return (
+      <Card style={styles.rating}>
+        <Text variant="h2">Rating</Text>
+        <Text variant="caption" color="text3">
+          The customer has not rated this agreement yet.
+        </Text>
+      </Card>
+    );
+  }
+
+  return (
+    <Card style={styles.rating}>
+      <Text variant="h2">Rate the trader</Text>
+      <Text variant="caption" color="text2">
+        Other customers compare traders on this. You can rate a settled agreement once.
+      </Text>
+      <Stars value={score} onChange={setScore} />
+      <Field
+        label="Comment"
+        value={comment}
+        onChangeText={setComment}
+        placeholder="Optional — how did the trader handle your capital?"
+        multiline
+        maxLength={1000}
+      />
+      {rate.isError ? <ErrorNotice title="Could not save the rating" error={rate.error} /> : null}
+      <Button
+        title="Submit rating"
+        loading={rate.isPending}
+        disabled={score < 1}
+        onPress={() => rate.mutate()}
+      />
+    </Card>
+  );
+}
+
+/** 1–5 yıldız. `onChange` verilmezse salt okunur. */
+function Stars({ value, onChange }: { value: number; onChange?: (n: number) => void }) {
+  return (
+    <View style={styles.stars}>
+      {[1, 2, 3, 4, 5].map((n) => {
+        const filled = n <= value;
+        const star = (
+          <Star
+            size={28}
+            color={filled ? colors.amber : colors.border}
+            fill={filled ? colors.amber : 'transparent'}
+          />
+        );
+        if (!onChange) return <View key={n}>{star}</View>;
+        return (
+          <Pressable
+            key={n}
+            accessibilityRole="button"
+            accessibilityLabel={`${n} star${n > 1 ? 's' : ''}`}
+            accessibilityState={{ selected: filled }}
+            hitSlop={6}
+            onPress={() => onChange(n)}
+          >
+            {star}
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
 function TxLinks({ agreement: a }: { agreement: AgreementOut }) {
   const links: { label: string; hash: string }[] = [];
   if (a.created_tx) links.push({ label: 'Created', hash: a.created_tx });
@@ -734,6 +852,8 @@ const styles = StyleSheet.create({
   figure: { gap: 2 },
   pending: { gap: spacing.sm, backgroundColor: colors.amberBg },
   actions: { gap: spacing.md },
+  rating: { gap: spacing.md, alignItems: 'flex-start' },
+  stars: { flexDirection: 'row', gap: spacing.sm },
   tradeSheet: { gap: spacing.md, width: '100%' },
   tradeGroup: { gap: spacing.sm },
   tradeChips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
