@@ -8,6 +8,7 @@ import {
   AsyncBoundary,
   EmptyState,
   HeaderActions,
+  HeaderIconButton,
   Screen,
   ScreenHeader,
 } from '@/components/layout';
@@ -73,15 +74,12 @@ export function MyListings({ role }: { role: UserRole }) {
             {/*
               Kaydedilenler ayrı bir ekranda: aşağıdaki sekmeler kendi ilanlarımın
               durumları, kaydedilenler ise başkalarının ilanları — aynı satıra
-              konsa ikisi karışırdı.
+              konsa ikisi karışırdı. Etiketli düğme başlığı iki satıra böldüğü
+              için zil/sohbet gibi simgeyle duruyor.
             */}
-            <Button
-              title="Saved"
-              variant="secondary"
-              size="sm"
-              onPress={() => router.push('/listing/saved')}
-              leftIcon={<Bookmark size={16} color={colors.navy900} />}
-            />
+            <HeaderIconButton label="Saved listings" onPress={() => router.push('/listing/saved')}>
+              <Bookmark size={20} color={colors.navy900} />
+            </HeaderIconButton>
             <Button
               title="New"
               size="sm"

@@ -28,32 +28,37 @@ export function HeaderActions() {
 
   return (
     <View style={styles.row}>
-      <Action
+      <HeaderIconButton
         label="Messages"
         count={messages.data?.conversations ?? 0}
         onPress={() => router.push('/messages')}
       >
         <MessageCircle size={20} color={colors.navy900} />
-      </Action>
-      <Action
+      </HeaderIconButton>
+      <HeaderIconButton
         label="Notifications"
         count={notifications.data?.unread ?? 0}
         onPress={() => router.push('/notifications')}
       >
         <Bell size={20} color={colors.navy900} />
-      </Action>
+      </HeaderIconButton>
     </View>
   );
 }
 
-function Action({
+/**
+ * Başlıktaki yuvarlak simge düğmesi. Başlık dar: etiketli bir düğme eklemek
+ * ekran adını iki satıra bölüyor, o yüzden buradaki eylemler simgeyle durur ve
+ * adlarını ekran okuyucuya `accessibilityLabel` ile söyler.
+ */
+export function HeaderIconButton({
   label,
-  count,
+  count = 0,
   onPress,
   children,
 }: {
   label: string;
-  count: number;
+  count?: number;
   onPress: () => void;
   children: React.ReactNode;
 }) {
