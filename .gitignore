@@ -29,3 +29,6 @@ Claude outputs/
 # Yerel ekran görüntüleri (test sırasında telefondan gelenler)
 WhatsApp Image *
 *.jpeg
+
+# Derlenmiş APK (GitHub tek dosyada 100 MiB sınırı koyuyor; sürüm eki olarak yüklenir)
+*.apk
