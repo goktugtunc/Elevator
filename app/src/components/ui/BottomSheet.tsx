@@ -1,14 +1,6 @@
 import { X } from 'lucide-react-native';
 import type { ReactNode } from 'react';
-import {
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  View,
-} from 'react-native';
+import { Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Text } from './Text';
@@ -48,10 +40,16 @@ export function BottomSheet({
           style={styles.backdrop}
           onPress={onClose}
         />
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={styles.sheetWrap}
-        >
+        {/*
+          Klavye telafisi burada **yok**: `Modal` Android'de kendi penceresini
+          açar ve o pencere klavyeye göre küçülür (ana etkinliğin edge-to-edge
+          ayarından etkilenmez). Elle boşluk eklemek sheet'i klavyenin bir boy
+          üstüne itip arada gri bir şerit bırakıyordu.
+
+          `sheetWrap` yüksekliği kesin (flex) olduğu için sheet'in yüzdelik
+          sınırı doğru çözülür ve gövde taşmak yerine kısalıp kaydırılır.
+        */}
+        <View style={styles.sheetWrap}>
           <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, spacing.lg) }]}>
             <View style={styles.handle} />
             <View style={styles.header}>
@@ -84,7 +82,7 @@ export function BottomSheet({
 
             {footer ? <View style={styles.footer}>{footer}</View> : null}
           </View>
-        </KeyboardAvoidingView>
+        </View>
       </View>
     </Modal>
   );
@@ -100,7 +98,13 @@ const styles = StyleSheet.create({
     bottom: 0,
     backgroundColor: 'rgba(11, 31, 58, 0.45)',
   },
-  sheetWrap: { width: '100%', maxWidth: layout.maxContentWidth, alignSelf: 'center' },
+  sheetWrap: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    width: '100%',
+    maxWidth: layout.maxContentWidth,
+    alignSelf: 'center',
+  },
   sheet: {
     backgroundColor: colors.surface,
     borderTopLeftRadius: radius.lg,
@@ -108,6 +112,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: layout.screenPaddingH,
     paddingTop: spacing.sm,
     maxHeight: '88%',
+    flexShrink: 1,
   },
   handle: {
     width: 40,
@@ -120,7 +125,8 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.md },
   headerText: { flex: 1, gap: 2 },
   close: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
-  body: { marginTop: spacing.lg },
+  // Alan daralınca taşmak yerine kısalıp kaydırılabilir kalır (klavye açıkken).
+  body: { marginTop: spacing.lg, flexShrink: 1 },
   bodyContent: { gap: spacing.lg, paddingBottom: spacing.md },
   footer: { paddingTop: spacing.md, gap: spacing.sm },
 });

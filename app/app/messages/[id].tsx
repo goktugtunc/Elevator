@@ -2,22 +2,16 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Send } from 'lucide-react-native';
 import { useEffect, useRef, useState } from 'react';
-import {
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  TextInput,
-  View,
-} from 'react-native';
+import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
 import { AsyncBoundary, EmptyState, Screen, TopBar } from '@/components/layout';
+
 import { OfferSheet } from '@/components/discover';
 import { Button, Text } from '@/components/ui';
 import { conversationsApi, listingsApi, offersApi } from '@/lib/api';
 import type { MessageOut, OfferCreateIn } from '@/lib/api/types';
 import { userMessage } from '@/lib/errors';
+import { useKeyboardHeight } from '@/lib/useKeyboardHeight';
 import { useSession } from '@/store/session';
 import { formatRelative } from '@/lib/format';
 import { colors, fontFamily, radius, spacing } from '@/theme';
@@ -34,6 +28,7 @@ export default function Conversation() {
   const [draft, setDraft] = useState('');
   const [offerOpen, setOfferOpen] = useState(false);
   const role = useSession((st) => st.role);
+  const keyboardHeight = useKeyboardHeight();
   const scrollRef = useRef<ScrollView>(null);
 
   const conversation = useQuery({
@@ -66,6 +61,14 @@ export default function Conversation() {
       .then(() => qc.invalidateQueries({ queryKey: ['conversations'] }))
       .catch(() => undefined);
   }, [id, messages.data?.items.length, qc]);
+
+  // Klavye açılınca son mesaj görünsün.
+  useEffect(() => {
+    if (keyboardHeight > 0) {
+      const t = setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 60);
+      return () => clearTimeout(t);
+    }
+  }, [keyboardHeight]);
 
   const other = conversation.data?.other_user;
 
@@ -112,10 +115,15 @@ export default function Conversation() {
           ) : null
         }
       />
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={90}
+      {/*
+        Klavye yüksekliği kadar alttan boşluk: edge-to-edge açıkken pencere
+        küçülmediği için yazma alanı aksi hâlde klavyenin altında kalıyor.
+      */}
+      <View
+        style={[
+          styles.flex,
+          keyboardHeight > 0 ? { paddingBottom: keyboardHeight } : null,
+        ]}
       >
         <ScrollView
           ref={scrollRef}
@@ -169,7 +177,7 @@ export default function Conversation() {
             <Send size={18} color={colors.onNavy} />
           </Pressable>
         </View>
-      </KeyboardAvoidingView>
+      </View>
 
       <OfferSheet
         key={counterpartListing.data?.id ?? 'offer-sheet'}

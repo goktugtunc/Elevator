@@ -3,6 +3,7 @@ import { ScrollView, StyleSheet, View, type ViewStyle } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { RiskStrip } from './RiskStrip';
+import { useKeyboardHeight } from '@/lib/useKeyboardHeight';
 import { colors, layout } from '@/theme';
 
 /**
@@ -30,11 +31,19 @@ export function Screen({
   contentStyle,
 }: ScreenProps) {
   const insets = useSafeAreaInsets();
+  const keyboardHeight = useKeyboardHeight();
   const body = scroll ? (
     <ScrollView
       style={styles.flex}
-      contentContainerStyle={[padded && styles.padded, contentStyle]}
+      // Klavye açıkken alttaki alanlara erişilebilsin: edge-to-edge'de pencere
+      // küçülmediği için içerik klavyenin altında kalıyordu.
+      contentContainerStyle={[
+        padded && styles.padded,
+        contentStyle,
+        keyboardHeight > 0 ? { paddingBottom: keyboardHeight } : null,
+      ]}
       keyboardShouldPersistTaps="handled"
+      keyboardDismissMode="on-drag"
     >
       {children}
     </ScrollView>
