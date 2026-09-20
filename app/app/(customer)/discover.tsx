@@ -153,12 +153,12 @@ export default function CustomerDiscover() {
           <View style={styles.actionsWrap} pointerEvents="box-none">
             <View style={styles.actions}>
               <ActionButton
-                label="Skip"
-                onPress={() => deckRef.current?.swipe('down')}
-                disabled={!top}
-                tint={colors.loss}
+                label="Interested"
+                onPress={() => deckRef.current?.swipe('up')}
+                disabled={!top || act.isPending}
+                tint={colors.profit}
               >
-                <X size={22} color={colors.loss} />
+                <Check size={22} color={colors.profit} />
               </ActionButton>
               <ActionButton
                 label="Follow"
@@ -169,12 +169,12 @@ export default function CustomerDiscover() {
                 <Heart size={20} color={colors.navy900} />
               </ActionButton>
               <ActionButton
-                label="Interested"
-                onPress={() => deckRef.current?.swipe('up')}
-                disabled={!top || act.isPending}
-                tint={colors.profit}
+                label="Skip"
+                onPress={() => deckRef.current?.swipe('down')}
+                disabled={!top}
+                tint={colors.loss}
               >
-                <Check size={22} color={colors.profit} />
+                <X size={22} color={colors.loss} />
               </ActionButton>
             </View>
           </View>
@@ -261,6 +261,8 @@ const styles = StyleSheet.create({
     bottom: 0,
     justifyContent: 'center',
   },
+  /** Sıra hareket yönünü yansıtır: olumlu aksiyon üstte (yukarı kaydırma),
+   *  geç altta (aşağı kaydırma). */
   actions: { gap: spacing.lg, alignItems: 'center' },
   action: { alignItems: 'center', gap: spacing.xs },
   actionButton: {

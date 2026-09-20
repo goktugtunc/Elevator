@@ -143,12 +143,12 @@ export default function TraderDiscover() {
           <View style={styles.actionsWrap} pointerEvents="box-none">
             <View style={styles.actions}>
               <ActionButton
-                label="Skip"
-                onPress={() => deckRef.current?.swipe('down')}
+                label="Make offer"
+                onPress={() => deckRef.current?.swipe('up')}
                 disabled={!top}
-                tint={colors.loss}
+                tint={colors.profit}
               >
-                <X size={22} color={colors.loss} />
+                <Check size={22} color={colors.profit} />
               </ActionButton>
               <ActionButton
                 label="Save"
@@ -159,12 +159,12 @@ export default function TraderDiscover() {
                 <Bookmark size={20} color={colors.navy900} />
               </ActionButton>
               <ActionButton
-                label="Make offer"
-                onPress={() => deckRef.current?.swipe('up')}
+                label="Skip"
+                onPress={() => deckRef.current?.swipe('down')}
                 disabled={!top}
-                tint={colors.profit}
+                tint={colors.loss}
               >
-                <Check size={22} color={colors.profit} />
+                <X size={22} color={colors.loss} />
               </ActionButton>
             </View>
           </View>
@@ -252,6 +252,8 @@ const styles = StyleSheet.create({
     bottom: 0,
     justifyContent: 'center',
   },
+  /** Sıra hareket yönünü yansıtır: olumlu aksiyon üstte (yukarı kaydırma),
+   *  geç altta (aşağı kaydırma). */
   actions: { gap: spacing.lg, alignItems: 'center' },
   action: { alignItems: 'center', gap: spacing.xs },
   actionButton: {
