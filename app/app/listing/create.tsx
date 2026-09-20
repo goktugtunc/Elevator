@@ -13,23 +13,10 @@ import type {
   RiskProfile,
   UserRole,
 } from '@/lib/api/types';
-import { formatAmount, parseNumberInput } from '@/lib/format';
+import { assetLabel, formatAmount, parseNumberInput } from '@/lib/format';
 import { useOnchainAction, phaseLabel } from '@/lib/onchain';
 import { useSession } from '@/store/session';
 import { colors, radius, spacing } from '@/theme';
-
-/**
- * Çip etiketi. Ağda aynı kodu taşıyan birden çok varlık olabiliyor (testnet'te
- * iki ayrı USDC gibi); o zaman kod tek başına ayırt etmiyor ve kullanıcı hangi
- * USDC'yi seçtiğini bilmeden para yatırıyor. Böyle durumda varlık adındaki
- * parantez içi nitelemenin ilk sözcüğü eklenir: "USDC · Circle".
- */
-function assetLabel(asset: AssetOut, all: AssetOut[]): string {
-  if (all.filter((a) => a.code === asset.code).length < 2) return asset.code;
-  const qualifier = /\(([^)]+)\)/.exec(asset.name)?.[1] ?? asset.name;
-  const first = qualifier.trim().split(/\s+/)[0];
-  return first ? `${asset.code} · ${first}` : asset.code;
-}
 
 const MARKETS: { value: MarketCategory; label: string }[] = [
   { value: 'crypto', label: 'Crypto' },

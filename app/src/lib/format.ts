@@ -91,3 +91,20 @@ export function formatDuration(days: number | null | undefined): string {
   }
   return days === 1 ? '1 day' : `${days} days`;
 }
+
+/**
+ * Varlık çipi/etiketi. Ağda aynı kodu taşıyan birden çok varlık olabiliyor
+ * (testnet'te iki ayrı USDC); o zaman kod tek başına ayırt etmiyor ve kullanıcı
+ * hangisini seçtiğini bilmeden para yatırıyor ya da takas ediyor. Böyle
+ * durumda varlık adındaki parantez içi nitelemenin ilk sözcüğü eklenir:
+ * "USDC · Circle".
+ */
+export function assetLabel(
+  asset: { code: string; name?: string | null },
+  all: { code: string }[],
+): string {
+  if (all.filter((a) => a.code === asset.code).length < 2) return asset.code;
+  const qualifier = /\(([^)]+)\)/.exec(asset.name ?? '')?.[1] ?? asset.name ?? '';
+  const first = qualifier.trim().split(/\s+/)[0];
+  return first ? `${asset.code} · ${first}` : asset.code;
+}
