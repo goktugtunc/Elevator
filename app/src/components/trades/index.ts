@@ -1,1 +1,1 @@
-export { NewTradeSheet } from './NewTradeSheet';
+export { TradeSheet } from './TradeSheet';

@@ -118,7 +118,7 @@ export default function Login() {
     <Screen contentStyle={styles.content}>
       <View style={styles.logo}>
         <Text variant="h2" color={colors.onNavy}>
-          TK
+          EL
         </Text>
       </View>
       <Text variant="display">Welcome</Text>

@@ -5,12 +5,10 @@ import { useState } from 'react';
 import { Linking, Pressable, StyleSheet, View } from 'react-native';
 
 import { AsyncBoundary, EmptyState, Screen, TopBar } from '@/components/layout';
-import { MarketChart } from '@/components/market';
+import { TradeSheet } from '@/components/trades';
 import {
-  BottomSheet,
   Button,
   Card,
-  Chip,
   ErrorNotice,
   Field,
   KpiBox,
@@ -23,16 +21,14 @@ import {
   StatusChip,
   Text,
 } from '@/components/ui';
-import { agreementsApi, metaApi } from '@/lib/api';
-import type { AgreementOut, AgreementStatus, AssetOut, TradeOut } from '@/lib/api/types';
+import { agreementsApi } from '@/lib/api';
+import type { AgreementOut, AgreementStatus, TradeOut } from '@/lib/api/types';
 import {
-  assetLabel,
   formatAmount,
   formatAmountExact,
   formatBps,
   formatBpsSigned,
   formatRelative,
-  parseNumberInput,
 } from '@/lib/format';
 import { phaseLabel, useOnchainAction } from '@/lib/onchain';
 import { explorerTxUrl } from '@/lib/stellar';
@@ -465,207 +461,6 @@ function Actions({
   );
 }
 
-/**
- * İşlem açma paneli.
- *
- * Trader parayı çekemez, yalnızca kasanın içinde izinli router üzerinden takas
- * eder. Kontrat, işlem sonrası portföy değeri maks. kayıp tabanının altına
- * düşecekse takası reddeder; bu yüzden imzadan önce sunucudan kotasyon alınır
- * ve `allowed` / `reason` olduğu gibi gösterilir — kullanıcı reddedilecek bir
- * işlemi imzalamaya çalışıp ücret ödemesin.
- */
-function TradeSheet({
-  agreement: a,
-  visible,
-  onClose,
-  onDone,
-}: {
-  agreement: AgreementOut;
-  visible: boolean;
-  onClose: () => void;
-  onDone: () => void;
-}) {
-  // Varlıklar **kimlikle** tutulur, koduyla değil: testnet'te iki ayrı USDC var
-  // ve sunucu kod gönderilince `ambiguous_token` ile reddediyor.
-  const router = useRouter();
-  const [tokenIn, setTokenIn] = useState<string | null>(null);
-  const [tokenOut, setTokenOut] = useState<string | null>(null);
-  const [amount, setAmount] = useState('');
-
-  const assets = useQuery({ queryKey: ['assets', 'all'], queryFn: () => metaApi.assets(), enabled: visible });
-
-  /** Kasada bakiyesi olan varlıklar — satılabilecek olanlar. */
-  const holdings = (a.balances ?? []).filter((b) => Number(b.balance) > 0);
-  const inAsset = holdings.find((b) => b.asset.id === tokenIn)?.asset ?? holdings[0]?.asset ?? a.base_asset;
-  const inBalance = holdings.find((b) => b.asset.id === inAsset.id)?.balance ?? '0';
-
-  const outOptions: AssetOut[] = (assets.data ?? []).filter((x) => x.id !== inAsset.id);
-  const outAsset = outOptions.find((x) => x.id === tokenOut) ?? outOptions[0] ?? null;
-
-  const value = parseNumberInput(amount);
-  const canQuote = Boolean(outAsset) && value !== null && value > 0 && value <= Number(inBalance);
-
-  const quote = useQuery({
-    queryKey: ['agreement', a.id, 'quote', inAsset.id, outAsset?.id, amount],
-    queryFn: () =>
-      agreementsApi.quote(a.id, {
-        token_in: inAsset.id,
-        token_out: outAsset?.id as string,
-        amount_in: String(value),
-      }),
-    enabled: visible && canQuote,
-    retry: false,
-  });
-
-  const trade = useOnchainAction({
-    build: () =>
-      agreementsApi.buildTradeTx(a.id, {
-        token_in: inAsset.id,
-        token_out: outAsset?.id as string,
-        amount_in: String(value),
-      }),
-    invalidate: [['agreement', a.id], ['dashboard'], ['agreements']],
-    onSuccess: (res) => {
-      if (res.ok) onDone();
-    },
-  });
-
-  const q = quote.data;
-
-  return (
-    <BottomSheet
-      visible={visible}
-      onClose={onClose}
-      title="Open a trade"
-      subtitle="Swaps inside the escrow. The capital never leaves the contract."
-      /*
-        Düz düğme, kaydırmalı onay değil. Kaydırma geri dönüşsüz kasa
-        hareketleri için var; takas parayı kasadan çıkarmıyor, maks. kayıp
-        tabanıyla zaten sınırlı ve kotasyon zamana duyarlı — araya fazladan
-        bir hareket koymak kotasyonu eskitmekten başka bir şey yapmıyor.
-      */
-      footer={
-        <>
-          <Button
-            title="Trade"
-            fullWidth
-            loading={trade.busy}
-            disabled={!q?.allowed}
-            onPress={trade.run}
-          />
-          <Text variant="caption" color="text3">
-            Your wallet signs this transaction; your secret key never leaves the device.
-          </Text>
-        </>
-      }
-    >
-      <View style={styles.tradeSheet}>
-        {/*
-          Karar noktası burası: trader takas tutarını yazmadan önce piyasaya
-          baksın diye grafik formun üstünde duruyor.
-        */}
-        <MarketChart
-          height={150}
-          onExpand={(range) => router.push(`/market?range=${range}`)}
-        />
-
-        <View style={styles.tradeGroup}>
-          <Text variant="captionStrong" color="text2">
-            Sell
-          </Text>
-          <View style={styles.tradeChips}>
-            {holdings.map((b) => (
-              <Chip
-                key={b.asset.id}
-                label={assetLabel(b.asset, holdings.map((h) => h.asset))}
-                active={inAsset.id === b.asset.id}
-                onPress={() => setTokenIn(b.asset.id)}
-              />
-            ))}
-          </View>
-          <Text variant="caption" color="text3">
-            In escrow: {formatAmountExact(inBalance, inAsset.code)}
-          </Text>
-        </View>
-
-        <View style={styles.tradeGroup}>
-          <Text variant="captionStrong" color="text2">
-            Buy
-          </Text>
-          <View style={styles.tradeChips}>
-            {outOptions.map((x) => (
-              <Chip
-                key={x.id}
-                label={assetLabel(x, outOptions)}
-                active={outAsset?.id === x.id}
-                onPress={() => setTokenOut(x.id)}
-              />
-            ))}
-          </View>
-        </View>
-
-        <Field
-          label="Amount"
-          value={amount}
-          onChangeText={setAmount}
-          placeholder={inBalance}
-          keyboardType="decimal-pad"
-          suffix={inAsset.code}
-          error={
-            value !== null && value > Number(inBalance)
-              ? `The escrow holds ${formatAmountExact(inBalance, inAsset.code)}.`
-              : undefined
-          }
-        />
-        <Button title="Use the whole balance" variant="ghost" size="sm" onPress={() => setAmount(inBalance)} />
-
-        {quote.isFetching ? (
-          <Text variant="caption" color="text2">
-            Getting a quote…
-          </Text>
-        ) : null}
-        {quote.isError ? <ErrorNotice title="No quote" error={quote.error} /> : null}
-
-        {q ? (
-          <Card style={styles.quoteCard}>
-            <Row label="You get" value={formatAmountExact(q.amount_out, q.token_out.code)} />
-            <Row label="At worst" value={formatAmountExact(q.min_out, q.token_out.code)} />
-            <Row label="Price" value={`1 ${q.token_in.code} = ${q.price} ${q.token_out.code}`} />
-            {q.price_impact_pct ? <Row label="Price impact" value={`${q.price_impact_pct}%`} /> : null}
-            <Row
-              label="Max-loss headroom"
-              value={formatAmount(q.headroom, a.base_asset.code)}
-            />
-            {!q.allowed ? (
-              <Text variant="caption" color="loss">
-                {q.reason ?? 'The contract would reject this trade.'}
-              </Text>
-            ) : null}
-          </Card>
-        ) : null}
-
-        {trade.error ? <ErrorNotice title="Trade failed" error={trade.error} /> : null}
-        {trade.busy ? (
-          <Text variant="caption" color="text2">
-            {phaseLabel(trade.phase)}
-          </Text>
-        ) : null}
-
-      </View>
-    </BottomSheet>
-  );
-}
-
-function Row({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={styles.quoteRow}>
-      <Text variant="caption" color="text2">
-        {label}
-      </Text>
-      <Text variant="bodyStrong">{value}</Text>
-    </View>
-  );
-}
 
 /**
  * Kapanan anlaşmanın puanlanması.
@@ -869,11 +664,6 @@ const styles = StyleSheet.create({
   // almalı; aksi hâlde alanlar içeriklerine göre daralıp tek sütuna sıkışıyor.
   rating: { gap: spacing.md },
   stars: { flexDirection: 'row', gap: spacing.sm, alignSelf: 'flex-start' },
-  tradeSheet: { gap: spacing.md, width: '100%' },
-  tradeGroup: { gap: spacing.sm },
-  tradeChips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
-  quoteCard: { gap: spacing.xs, width: '100%' },
-  quoteRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   actionChips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   errorBox: { gap: 2, padding: spacing.md, borderRadius: radius.md, backgroundColor: colors.redBg },
 });

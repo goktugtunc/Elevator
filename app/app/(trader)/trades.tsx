@@ -12,7 +12,7 @@ import {
   ScreenHeader,
 } from '@/components/layout';
 import { MarketChart } from '@/components/market';
-import { NewTradeSheet } from '@/components/trades';
+import { TradeSheet } from '@/components/trades';
 import { Button, Card, KpiBox, ListRow, Segmented, StatusChip, Text } from '@/components/ui';
 import { activityApi, agreementsApi, dashboardApi } from '@/lib/api';
 import type { ActivityItemOut, AgreementOut, TraderDashboardOut } from '@/lib/api/types';
@@ -139,10 +139,16 @@ export default function TraderTrades() {
       </View>
 
       {tradeOn ? (
-        <NewTradeSheet
+        <TradeSheet
           agreement={tradeOn}
           visible={Boolean(tradeOn)}
           onClose={() => setTradeOn(null)}
+          onDone={() => {
+            // Takas zincire yazıldı: panel kapanır, açık pozisyonlar listesi
+            // `useOnchainAction`'ın tazelediği sorgulardan yeni değeri alır.
+            setTradeOn(null);
+            setTab('open');
+          }}
         />
       ) : null}
     </Screen>

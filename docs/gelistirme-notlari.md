@@ -1,4 +1,4 @@
-# Trader Kirala: Geliştirme Notları (Güncel)
+# Elevator: Geliştirme Notları (Güncel)
 
 Kaynak: Risein Stellar Pro Hackathon görev sayfaları (Submission Criteria, Judging Criteria, Developer Resources, Track sayfaları). Tasarım: Figma (`6ZxzvsYKarDglg0PGYRIgP`). Yalnızca teknik alanlar ele alınmıştır.
 
