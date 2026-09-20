@@ -82,6 +82,62 @@ function sessionAddress(provider: Provider): string | null {
 }
 
 /**
+ * Oturumu hem relay'den hem yerel depodan düşürür.
+ *
+ * `disconnect()` tek başına yetmiyor: relay oturumu zaten unuttuysa çağrının
+ * kendisi "No matching key" ile patlıyor ve AsyncStorage'daki kayıt yerinde
+ * kalıyor. Kayıt kalınca `connect()` her seferinde ölü oturumu geri veriyor,
+ * kullanıcı da "Connect wallet" dedikçe aynı hatayı alıyor. Bu yüzden relay
+ * çağrısı başarısız olsa bile yerel kayıt siliniyor.
+ */
+async function forgetSession(provider: Provider): Promise<void> {
+  const topic = provider.session?.topic;
+  debugLog('wallet:wc', 'ölü oturum düşürülüyor', { topic: topic ?? null });
+  try {
+    await provider.disconnect();
+  } catch (err) {
+    debugError('wallet:wc', 'disconnect başarısız (relay zaten bilmiyor olabilir)', err);
+  }
+  const client = (provider as unknown as { client?: { session?: { delete(topic: string, reason: { code: number; message: string }): Promise<void> } } }).client;
+  if (topic && client?.session) {
+    await client.session
+      .delete(topic, { code: 6000, message: 'stale session' })
+      .catch(() => undefined);
+  }
+  (provider as unknown as { session?: unknown }).session = undefined;
+}
+
+/**
+ * Kayıtlı oturum gerçekten ayakta mı?
+ *
+ * Süresi dolmuşsa relay'e sormaya gerek yok. Değilse `ping` atılır: cevap
+ * gelmezse oturum relay tarafında yok demektir. İmza isteğinin ortasında
+ * öğrenmektense burada öğrenmek daha iyi — orada kullanıcı cüzdanı açmış,
+ * beklemiş ve eli boş dönmüş oluyor.
+ */
+async function sessionIsAlive(provider: Provider): Promise<boolean> {
+  const topic = provider.session?.topic;
+  if (!topic) return false;
+
+  const expiry = provider.session?.expiry;
+  if (typeof expiry === 'number' && expiry * 1000 <= Date.now()) {
+    debugLog('wallet:wc', 'kayıtlı oturumun süresi dolmuş', { expiry });
+    return false;
+  }
+
+  const client = (provider as unknown as { client?: { ping(args: { topic: string }): Promise<void> } }).client;
+  if (!client?.ping) return true; // soramıyorsak oturuma güven; hata imza adımında yakalanır
+
+  try {
+    await withTimeout(client.ping({ topic }), PING_TIMEOUT_MS);
+    return true;
+  } catch (err) {
+    debugError('wallet:wc', 'oturum ping yanıtı yok — bayat sayılıyor', err);
+    return false;
+  }
+}
+
+/**
  * İmza isteği relay üzerinden cüzdana gider ama cüzdan uygulaması kendiliğinden
  * öne gelmez; dApp'in deep link ile açması gerekir. Adres:
  *   1. oturumdaki cüzdanın kendi `redirect.native`'i (en doğrusu)
@@ -114,6 +170,17 @@ async function bringWalletToFront(provider: Provider): Promise<void> {
 /** İstek yanıtsız kalırsa sonsuza kadar beklemeyelim. */
 const REQUEST_TIMEOUT_MS = 120_000;
 
+/** Oturumun hâlâ yaşadığını relay'e sorarken beklenecek süre. */
+const PING_TIMEOUT_MS = 8_000;
+
+/**
+ * Relay, kendisinde karşılığı kalmamış bir oturum/eşleşme için bunu döndürür.
+ * AsyncStorage'daki oturum hayatta görünür ama ilk istekte bu hata gelir.
+ */
+function isStaleSessionError(msg: string): boolean {
+  return /no matching key|topic doesn't exist|topic does not exist|session: |expired/i.test(msg);
+}
+
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(
@@ -139,15 +206,41 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   });
 }
 
+/**
+ * Hata nesnesinden okunabilir metin.
+ *
+ * Relay düz nesne fırlatıyor ve bunun `message` alanı her zaman olmuyor —
+ * kendi logger'ı `msg` kullanıyor. Eskiden `String(err)` çağrılıyordu, o da
+ * kullanıcıya birebir "[object Object]" gösteriyordu.
+ */
+function errorText(err: unknown): string {
+  if (typeof err === 'string') return err;
+  if (err instanceof Error) return err.message;
+  if (err && typeof err === 'object') {
+    const o = err as Record<string, unknown>;
+    for (const key of ['message', 'msg', 'reason', 'error']) {
+      const v = o[key];
+      if (typeof v === 'string' && v.trim()) return v;
+    }
+    try {
+      const json = JSON.stringify(err);
+      if (json && json !== '{}') return json;
+    } catch {
+      /* döngüsel nesne */
+    }
+    return '';
+  }
+  return err == null ? '' : String(err);
+}
+
 function mapError(err: unknown): WalletError {
   if (err instanceof WalletError) return err;
-  // Relay düz nesne fırlatıyor ({ code, message }); Error varsayımı mesajı yutuyordu.
-  const msg =
-    err instanceof Error
-      ? err.message
-      : err && typeof err === 'object' && typeof (err as { message?: unknown }).message === 'string'
-        ? (err as { message: string }).message
-        : String(err);
+  const msg = errorText(err);
+  if (isStaleSessionError(msg))
+    return new WalletError(
+      'Your wallet connection expired. Tap Connect again to pair your wallet.',
+      'NOT_CONNECTED',
+    );
   // Freighter kilitliyken isteği onay ekranı göstermeden reddediyor ve
   // "User rejected. User not authenticated" diyor. Bunu "siz reddettiniz"
   // diye göstermek yanıltıcı olur — yapılması gereken kilidi açmaktır.
@@ -165,7 +258,7 @@ function mapError(err: unknown): WalletError {
     );
   if (/expire|timeout/i.test(msg))
     return new WalletError('The connection request timed out. Try again.', 'UNKNOWN');
-  return new WalletError(msg || 'Wallet error', 'UNKNOWN');
+  return new WalletError(msg || 'The wallet could not be reached. Try connecting again.', 'UNKNOWN');
 }
 
 export const walletConnectWallet: WalletAdapter = {
@@ -196,13 +289,24 @@ export const walletConnectWallet: WalletAdapter = {
         debugError('wallet:wc', 'eski eşleşmeler temizlenemedi', err);
       }
 
-      // Zaten kurulu bir oturum varsa cüzdanı tekrar yormayalım.
+      // Zaten kurulu bir oturum varsa cüzdanı tekrar yormayalım — ama önce
+      // gerçekten ayakta olduğunu doğrula. Kayıt yerinde durup relay'de
+      // karşılığı kalmamış oluyor; o hâlde adresi geri vermek kullanıcıyı
+      // imza adımında duvara çarptırıyor ve her denemede aynı yere düşüyor.
+      // Ölüyse burada düşürülür ve aşağıdaki taze eşleşmeye devam edilir.
       const existing = sessionAddress(provider);
       if (existing) {
-        debugLog('wallet:wc', 'MEVCUT oturum kullanıldı, yeni eşleşme yok', { address: existing });
-        return { address: existing, walletId: 'walletconnect' };
+        if (await sessionIsAlive(provider)) {
+          debugLog('wallet:wc', 'MEVCUT oturum kullanıldı, yeni eşleşme yok', { address: existing });
+          return { address: existing, walletId: 'walletconnect' };
+        }
+        debugLog('wallet:wc', 'kayıtlı oturum ölü — temizlenip yeniden eşleşilecek', {
+          address: existing,
+        });
+        await forgetSession(provider);
+      } else {
+        debugLog('wallet:wc', 'kayıtlı oturum yok, yeni eşleşme gerekiyor');
       }
-      debugLog('wallet:wc', 'kayıtlı oturum yok, yeni eşleşme gerekiyor');
 
       debugLog('wallet:wc', 'eşleşme başlatılıyor', { chain: CHAIN, methods: METHODS });
       const onUri = (uri: string) => {
@@ -281,7 +385,14 @@ export const walletConnectWallet: WalletAdapter = {
       }
       return result.signedXDR;
     } catch (err) {
-      throw mapError(err);
+      const mapped = mapError(err);
+      // Oturum relay tarafında yoksa kaydı burada da düşür: aksi hâlde kullanıcı
+      // "Connect" deyip aynı ölü oturuma geri dönüyor.
+      if (mapped.code === 'NOT_CONNECTED' && isStaleSessionError(errorText(err))) {
+        const provider = await getProvider().catch(() => null);
+        if (provider) await forgetSession(provider).catch(() => undefined);
+      }
+      throw mapped;
     }
   },
 };
