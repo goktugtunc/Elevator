@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { Linking, Pressable, StyleSheet, View } from 'react-native';
 
 import { AsyncBoundary, EmptyState, Screen, TopBar } from '@/components/layout';
+import { MarketChart } from '@/components/market';
 import {
   BottomSheet,
   Button,
@@ -486,6 +487,7 @@ function TradeSheet({
 }) {
   // Varlıklar **kimlikle** tutulur, koduyla değil: testnet'te iki ayrı USDC var
   // ve sunucu kod gönderilince `ambiguous_token` ile reddediyor.
+  const router = useRouter();
   const [tokenIn, setTokenIn] = useState<string | null>(null);
   const [tokenOut, setTokenOut] = useState<string | null>(null);
   const [amount, setAmount] = useState('');
@@ -558,6 +560,15 @@ function TradeSheet({
       }
     >
       <View style={styles.tradeSheet}>
+        {/*
+          Karar noktası burası: trader takas tutarını yazmadan önce piyasaya
+          baksın diye grafik formun üstünde duruyor.
+        */}
+        <MarketChart
+          height={150}
+          onExpand={(range) => router.push(`/market?range=${range}`)}
+        />
+
         <View style={styles.tradeGroup}>
           <Text variant="captionStrong" color="text2">
             Sell

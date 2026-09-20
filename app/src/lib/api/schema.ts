@@ -254,6 +254,32 @@ export interface BalanceOut {
   value_try?: string | null;
 }
 
+/** One OHLCV bar. Amounts are decimal strings, like every other amount in this API. */
+export interface CandleOut {
+  /** bar start, unix ms */
+  t: number;
+  o: string;
+  h: string;
+  l: string;
+  c: string;
+  /** volume-weighted average — the reference used to clip outliers */
+  avg: string;
+  /** base asset volume */
+  v: string;
+  trades: number;
+}
+
+export interface CandlesOut {
+  pair: string;
+  range: string;
+  interval: string;
+  source: string;
+  candles?: CandleOut[];
+  last?: string | null;
+  change_bps?: number;
+  median?: string | null;
+}
+
 export interface ChallengeIn {
   /** optional SEP-10 ID memo */
   memo?: number | null;

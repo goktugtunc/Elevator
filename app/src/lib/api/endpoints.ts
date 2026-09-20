@@ -8,6 +8,7 @@ import type {
   AnchorTransactionListOut,
   AnchorTransactionOut,
   AssetOut,
+  CandlesOut,
   AuthMeOut,
   ActivityItemOut,
   ConfigOut,
@@ -155,6 +156,17 @@ export const discoverApi = {
 };
 
 // --- İlanlar ---
+/** Piyasa verisi — grafikler. */
+export const marketApi = {
+  /**
+   * Stellar DEX mumları. Kaynak **mainnet**: testnet'in emir defteri sahte bir
+   * sabit kurda duruyor, işlem kararı için kullanılamaz.
+   * `interval` verilmezse aralığın varsayılanı (1g→saatlik, 1h/1a→günlük).
+   */
+  candles: (params: { pair?: string; range: '1d' | '1w' | '1m'; interval?: '15m' | '1h' | '1d' }) =>
+    http.get<CandlesOut>(`${V1}/market/candles`, params),
+};
+
 export const listingsApi = {
   list: (
     params?: PageParams & {
