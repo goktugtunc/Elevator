@@ -13,10 +13,12 @@ import {
 } from 'react-native';
 
 import { AsyncBoundary, EmptyState, Screen, TopBar } from '@/components/layout';
+import { OfferSheet } from '@/components/discover';
 import { Button, Text } from '@/components/ui';
-import { conversationsApi } from '@/lib/api';
-import type { MessageOut } from '@/lib/api/types';
+import { conversationsApi, listingsApi, offersApi } from '@/lib/api';
+import type { MessageOut, OfferCreateIn } from '@/lib/api/types';
 import { userMessage } from '@/lib/errors';
+import { useSession } from '@/store/session';
 import { formatRelative } from '@/lib/format';
 import { colors, fontFamily, radius, spacing } from '@/theme';
 
@@ -30,6 +32,8 @@ export default function Conversation() {
   const router = useRouter();
   const qc = useQueryClient();
   const [draft, setDraft] = useState('');
+  const [offerOpen, setOfferOpen] = useState(false);
+  const role = useSession((st) => st.role);
   const scrollRef = useRef<ScrollView>(null);
 
   const conversation = useQuery({
@@ -65,6 +69,32 @@ export default function Conversation() {
 
   const other = conversation.data?.other_user;
 
+  /**
+   * Teklif `listing_id` ister ama sohbette ilan bilgisi yok: `/listings` ucunda
+   * sahibe göre filtre, `TraderProfileOut`'ta da ilan kimliği bulunmuyor
+   * (yalnızca sayı). Bu yüzden ilgili türdeki aktif ilanlar çekilip karşı tarafa
+   * ait olan istemcide eşleniyor. Uç bir `owner_id` filtresi kazanırsa burası
+   * tek satıra iner.
+   */
+  const counterpartListing = useQuery({
+    queryKey: ['listings', 'of', other?.id, role],
+    queryFn: () =>
+      listingsApi.list({ kind: role === 'customer' ? 'service' : 'capital', limit: 100 }),
+    enabled: Boolean(other?.id && role),
+    select: (page) =>
+      page.items.find((l) => l.owner_id === other?.id && l.status === 'active') ?? null,
+  });
+
+  const createOffer = useMutation({
+    mutationFn: (draft: OfferCreateIn) => offersApi.create(draft),
+    onSuccess: () => {
+      setOfferOpen(false);
+      void qc.invalidateQueries({ queryKey: ['offers'] });
+      void qc.invalidateQueries({ queryKey: ['dashboard'] });
+      void qc.invalidateQueries({ queryKey: ['conversation', id, 'messages'] });
+    },
+  });
+
   return (
     <Screen padded={false} scroll={false}>
       <TopBar
@@ -77,6 +107,8 @@ export default function Conversation() {
               size="sm"
               onPress={() => router.push(`/contract/${conversation.data.agreement_id}`)}
             />
+          ) : counterpartListing.data ? (
+            <Button title="Make offer" size="sm" onPress={() => setOfferOpen(true)} />
           ) : null
         }
       />
@@ -101,7 +133,13 @@ export default function Conversation() {
               />
             }
           >
-            {(page) => <>{page.items.map((m) => <Bubble key={m.id} message={m} />)}</>}
+            {(page) => (
+              <>
+                {page.items.map((m) => (
+                  <Bubble key={m.id} message={m} />
+                ))}
+              </>
+            )}
           </AsyncBoundary>
         </ScrollView>
 
@@ -132,6 +170,19 @@ export default function Conversation() {
           </Pressable>
         </View>
       </KeyboardAvoidingView>
+
+      <OfferSheet
+        key={counterpartListing.data?.id ?? 'offer-sheet'}
+        listing={counterpartListing.data ?? null}
+        visible={offerOpen}
+        onClose={() => {
+          setOfferOpen(false);
+          createOffer.reset();
+        }}
+        submitting={createOffer.isPending}
+        error={createOffer.isError ? userMessage(createOffer.error) : null}
+        onSubmit={(d) => createOffer.mutate(d)}
+      />
     </Screen>
   );
 }

@@ -1,19 +1,19 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useRouter } from 'expo-router';
 import { Check, Heart, RotateCcw, X } from 'lucide-react-native';
 import { useCallback, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
 import {
   ListingCard,
-  OfferSheet,
   SwipeDeck,
   type SwipeDeckHandle,
   type SwipeDirection,
 } from '@/components/discover';
 import { Screen, ScreenHeader } from '@/components/layout';
 import { Button, Card, Text } from '@/components/ui';
-import { discoverApi, offersApi, tradersApi } from '@/lib/api';
-import type { DiscoverCardOut, InteractionAction, OfferCreateIn } from '@/lib/api/types';
+import { conversationsApi, discoverApi, tradersApi } from '@/lib/api';
+import type { DiscoverCardOut, InteractionAction } from '@/lib/api/types';
 import { userMessage } from '@/lib/errors';
 import { colors, layout, radius, shadow, spacing } from '@/theme';
 
@@ -23,11 +23,11 @@ import { colors, layout, radius, shadow, spacing } from '@/theme';
  * Etkileşimler `POST /discover/{target_type}/{target_id}/action` ile kaydedilir.
  */
 export default function CustomerDiscover() {
+  const router = useRouter();
   const qc = useQueryClient();
   const deckRef = useRef<SwipeDeckHandle>(null);
   const [top, setTop] = useState<DiscoverCardOut | null>(null);
   const [notice, setNotice] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
-  const [offerTarget, setOfferTarget] = useState<DiscoverCardOut | null>(null);
   const [deckKey, setDeckKey] = useState(0);
 
   const feed = useQuery({
@@ -41,22 +41,19 @@ export default function CustomerDiscover() {
     onError: (err) => setNotice({ tone: 'error', text: userMessage(err) }),
   });
 
-  // Teklif gönderildikten sonra kartı akıştan düşürmek için etkileşim de yazılır;
-  // `offer_request` tek başına yalnızca kartı işaretliyor, teklif oluşturmuyor.
-  const createOffer = useMutation({
-    mutationFn: (draft: OfferCreateIn) => offersApi.create(draft),
-    onSuccess: (_offer, draft) => {
-      const card = offerTarget;
-      setOfferTarget(null);
-      void qc.invalidateQueries({ queryKey: ['dashboard'] });
-      void qc.invalidateQueries({ queryKey: ['offers'] });
-      setNotice({ tone: 'ok', text: 'Your offer was sent to the trader.' });
-      if (card) {
-        act.mutate({ card, action: 'offer_request' });
-        deckRef.current?.swipe('up');
-      }
-      void draft;
+  /**
+   * "Interested" doğrudan teklif formuna götürmez: önce trader ile sohbet açılır,
+   * teklif oradaki düğmeyle istenildiği zaman verilir. Sohbet açma idempotenttir
+   * (`POST /conversations`), aynı trader'a tekrar basmak yeni konuşma yaratmaz.
+   */
+  const startChat = useMutation({
+    mutationFn: (card: DiscoverCardOut) => conversationsApi.start(card.listing.owner_id),
+    onSuccess: (conv, card) => {
+      void qc.invalidateQueries({ queryKey: ['conversations'] });
+      act.mutate({ card, action: 'offer_request' });
+      router.push(`/messages/${conv.id}`);
     },
+    onError: (err) => setNotice({ tone: 'error', text: userMessage(err) }),
   });
 
   const follow = useMutation({
@@ -74,16 +71,12 @@ export default function CustomerDiscover() {
     (card: DiscoverCardOut, direction: SwipeDirection) => {
       setNotice(null);
       if (direction === 'up') {
-        // Sağa kaydırma "ilgilendim" değil, teklif demektir: sunucuda teklif
-        // ancak POST /offers ile oluşuyor, `offer_request` yalnızca kartı
-        // işaretliyor. Eskiden kullanıcıya "teklifiniz gönderildi" deniyordu
-        // ama trader'ın haberi olmuyordu.
-        setOfferTarget(card);
+        startChat.mutate(card);
         return;
       }
       act.mutate({ card, action: 'pass' });
     },
-    [act],
+    [act, startChat],
   );
 
   const items = feed.data?.items ?? [];
@@ -188,18 +181,6 @@ export default function CustomerDiscover() {
           </View>
         ) : null}
       </View>
-      <OfferSheet
-        key={offerTarget?.listing.id ?? 'offer-sheet'}
-        listing={offerTarget?.listing ?? null}
-        visible={offerTarget !== null}
-        onClose={() => {
-          setOfferTarget(null);
-          createOffer.reset();
-        }}
-        submitting={createOffer.isPending}
-        error={createOffer.isError ? userMessage(createOffer.error) : null}
-        onSubmit={(draft) => createOffer.mutate(draft)}
-      />
     </Screen>
   );
 }

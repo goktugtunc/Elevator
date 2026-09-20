@@ -270,6 +270,9 @@ export const txApi = {
 // --- Mesajlar ---
 export const conversationsApi = {
   list: (params?: PageParams) => http.get<Page<ConversationOut>>(`${V1}/conversations`, params),
+  /** Teklife bağlı olmayan doğrudan sohbet açar; varsa mevcut olanı döner (idempotent). */
+  start: (userId: string) =>
+    http.post<ConversationOut>(`${V1}/conversations`, { user_id: userId }),
   unreadCount: () => http.get<ConversationsUnreadOut>(`${V1}/conversations/unread-count`),
   byId: (id: string) => http.get<ConversationOut>(`${V1}/conversations/${id}`),
   messages: (id: string, params?: { after?: string; before?: string; limit?: number }) =>
