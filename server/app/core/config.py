@@ -30,6 +30,8 @@ class Settings(BaseSettings):
     api_prefix: str = "/api/v1"
     cors_origins: list[str] = ["*"]
     docs_enabled: bool = True
+    # Google Play herkese acik, calisan bir iletisim adresi sart; hukuki sayfalarda gosterilir.
+    legal_contact_email: str | None = None
 
     # --- database ----------------------------------------------------------
     database_url: str = Field(

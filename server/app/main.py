@@ -26,10 +26,14 @@ log = logging.getLogger("app")
 
 # Order matters: Starlette matches routes in registration order. `config` is listed first so the rich
 # GET /api/v1/config (routers/config.py) is served; `meta` (no prefix) only carries /health*.
+# Prefixsiz, kok seviyede sunulanlar.
+ROOT_ROUTERS = {"meta", "legal"}
+
 ROUTER_MODULES = [
     "config",
     "market",  # /api/v1/market/candles  # /api/v1/config, /api/v1/fx, /api/v1/fx/convert
     "meta",  # /health, /health/stellar (mounted without prefix)
+    "legal",  # /legal/* — Play Store icin herkese acik hukuki sayfalar (prefixsiz)
     "auth",
     "users",
     "notifications",
@@ -131,7 +135,7 @@ def create_app() -> FastAPI:
         module = importlib.import_module(f"app.routers.{name}")
         router = module.router
         # meta router serves root-level paths (/health, /.well-known); everything else under the API prefix
-        prefix = "" if name == "meta" else settings.api_prefix
+        prefix = "" if name in ROOT_ROUTERS else settings.api_prefix
         app.include_router(router, prefix=prefix)
 
     return app
