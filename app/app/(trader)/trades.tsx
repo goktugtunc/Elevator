@@ -11,6 +11,7 @@ import {
   Screen,
   ScreenHeader,
 } from '@/components/layout';
+import { MarketChart } from '@/components/market';
 import { NewTradeSheet } from '@/components/trades';
 import { Button, Card, KpiBox, ListRow, Segmented, StatusChip, Text } from '@/components/ui';
 import { activityApi, agreementsApi, dashboardApi } from '@/lib/api';
@@ -72,6 +73,15 @@ export default function TraderTrades() {
             />
           </View>
         ) : null}
+
+        {/*
+          Grafik yalnız takas panelinin içinde duruyordu, yani trader ancak
+          işlem açma anında piyasaya bakabiliyordu. Burası onun işlem ekranı:
+          pozisyonlarının hemen üstünde, açmadan önce de bakabilsin.
+        */}
+        <Card style={styles.chart}>
+          <MarketChart height={160} onExpand={(range) => router.push(`/market?range=${range}`)} />
+        </Card>
 
         <Segmented
           options={[
@@ -211,6 +221,7 @@ function TradeRow({ item }: { item: ActivityItemOut }) {
 
 const styles = StyleSheet.create({
   body: { paddingHorizontal: spacing.lg, paddingBottom: spacing['2xl'], gap: spacing.md },
+  chart: { gap: spacing.sm },
   kpis: { flexDirection: 'row', gap: spacing.sm },
   kpi: { flex: 1 },
   list: { gap: spacing.md },
