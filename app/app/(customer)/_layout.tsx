@@ -4,7 +4,8 @@ import { Tabs } from 'expo-router/js-tabs';
 import { TabBar } from '@/components/layout';
 import { useSession } from '@/store/session';
 
-/** Figma "Tab Bar/Müşteri": Dashboard · Activity · Discover · Listings · Profile */
+/** Figma "Tab Bar/Müşteri": Dashboard · Activity · Elevator · Listings · Profile
+ *  (rota adı `discover` kalır — sunucu ucu ve derin bağlantılar ona bağlı) */
 export default function CustomerLayout() {
   const { status, role } = useSession();
   if (status !== 'signed_in') return <Redirect href="/(auth)/login" />;

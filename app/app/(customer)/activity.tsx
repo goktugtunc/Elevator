@@ -101,7 +101,7 @@ export default function CustomerActivity() {
               body={
                 activeFilters
                   ? 'No activity matches these filters.'
-                  : 'Follow a trader in Discover to see their trades as they happen.'
+                  : 'Follow a trader in the Elevator to see their trades as they happen.'
               }
               action={
                 activeFilters ? (

@@ -19,7 +19,7 @@ import { colors, layout, radius, spacing } from '@/theme';
 const SLIDES: { icon: LucideIcon; title: string; body: string }[] = [
   {
     icon: Compass,
-    title: 'Discover traders',
+    title: 'Take the Elevator',
     body: 'Swipe through traders and match with the right one. If you are a trader, browse investor listings instead.',
   },
   {

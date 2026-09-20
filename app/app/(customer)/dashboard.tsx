@@ -118,10 +118,10 @@ export default function CustomerDashboard() {
                 ) : (
                   <EmptyState
                     title="No open positions"
-                    body="Find a trader in Discover and send an offer to get started."
+                    body="Find a trader in the Elevator and send an offer to get started."
                     action={
                       <Button
-                        title="Discover traders"
+                        title="Open the Elevator"
                         size="sm"
                         onPress={() => router.push('/(customer)/discover')}
                       />
@@ -154,7 +154,7 @@ export default function CustomerDashboard() {
                 ) : (
                   <EmptyState
                     title="Not following anyone yet"
-                    body="Swipe right in Discover to follow a trader and track their moves."
+                    body="Swipe up in the Elevator to follow a trader and track their moves."
                   />
                 )}
               </Section>

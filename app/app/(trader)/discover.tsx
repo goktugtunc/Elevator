@@ -79,7 +79,7 @@ export default function TraderDiscover() {
 
   return (
     <Screen riskStrip={false} padded={false} scroll={false}>
-      <ScreenHeader title="Discover" subtitle="Browse capital listings and make offers" />
+      <ScreenHeader title="Elevator" subtitle="Browse capital listings and make offers" />
 
       <View style={styles.body}>
         {feed.isPending ? (

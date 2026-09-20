@@ -100,7 +100,7 @@ export default function ListingDetail() {
                       body={
                         l.is_owner
                           ? 'Offers on this listing will appear here.'
-                          : 'Be the first to send an offer from Discover.'
+                          : 'Be the first to send an offer from the Elevator.'
                       }
                     />
                   }

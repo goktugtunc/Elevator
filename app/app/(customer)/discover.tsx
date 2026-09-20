@@ -83,7 +83,7 @@ export default function CustomerDiscover() {
 
   return (
     <Screen riskStrip={false} padded={false} scroll={false}>
-      <ScreenHeader title="Discover" subtitle="Swipe through traders that fit you" />
+      <ScreenHeader title="Elevator" subtitle="Swipe through traders that fit you" />
 
       <View style={styles.body}>
         {feed.isPending ? (

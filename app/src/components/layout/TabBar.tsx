@@ -33,7 +33,7 @@ const LABELS: Record<string, string> = {
   dashboard: 'Dashboard',
   activity: 'Activity',
   trades: 'Trades',
-  discover: 'Discover',
+  discover: 'Elevator',
   listings: 'Listings',
   profile: 'Profile',
 };
