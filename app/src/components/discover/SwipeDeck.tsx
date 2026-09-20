@@ -20,14 +20,16 @@ import Animated, {
 } from 'react-native-reanimated';
 
 import { Text } from '@/components/ui';
-import { colors, fontFamily, layout, radius } from '@/theme';
+import { colors, fontFamily, radius } from '@/theme';
 
 /**
  * Keşfet destesi (FE-05) — Figma 2a–2d "Swipe Card".
- * Sağa kaydırma = olumlu aksiyon (Teklif İste / Ver), sola = Geç.
- * Kartlar tükendiğinde `renderEmpty` gösterilir; buton aksiyonları için `ref.swipe()`.
+ *
+ * Kaydırma **dikeydir**: yukarı = olumlu aksiyon (Teklif İste / Ver),
+ * aşağı = Geç. Kartlar tükendiğinde `renderEmpty` gösterilir; buton
+ * aksiyonları için `ref.swipe()`.
  */
-export type SwipeDirection = 'left' | 'right';
+export type SwipeDirection = 'up' | 'down';
 
 export interface SwipeDeckHandle {
   swipe: (direction: SwipeDirection) => void;
@@ -42,8 +44,8 @@ export interface SwipeDeckProps<T> {
   renderEmpty?: () => ReactNode;
   /** Üstteki kart değiştiğinde çağrılır (buton aksiyonları hangi ilana ait bilsin). */
   onTopChange?: (item: T | null) => void;
-  leftLabel?: string;
-  rightLabel?: string;
+  downLabel?: string;
+  upLabel?: string;
 }
 
 const SWIPE_THRESHOLD = 110;
@@ -57,13 +59,13 @@ function SwipeDeckInner<T>(
     onSwipe,
     renderEmpty,
     onTopChange,
-    leftLabel = 'SKIP',
-    rightLabel = 'OFFER',
+    downLabel = 'SKIP',
+    upLabel = 'OFFER',
   }: SwipeDeckProps<T>,
   ref: React.Ref<SwipeDeckHandle>,
 ) {
-  const { width } = useWindowDimensions();
-  const flyOut = Math.min(width, layout.maxContentWidth) * 1.4;
+  const { height } = useWindowDimensions();
+  const flyOut = height * 0.9;
   const [index, setIndex] = useState(0);
 
   const x = useSharedValue(0);
@@ -89,12 +91,12 @@ function SwipeDeckInner<T>(
 
   const animateOut = useCallback(
     (direction: SwipeDirection) => {
-      const target = direction === 'right' ? flyOut : -flyOut;
-      x.value = withTiming(target, { duration: 180 }, (finished) => {
+      const target = direction === 'up' ? -flyOut : flyOut;
+      y.value = withTiming(target, { duration: 180 }, (finished) => {
         if (finished) runOnJS(commit)(direction);
       });
     },
-    [commit, flyOut, x],
+    [commit, flyOut, y],
   );
 
   useImperativeHandle(ref, () => ({
@@ -105,17 +107,18 @@ function SwipeDeckInner<T>(
 
   const pan = Gesture.Pan()
     .onUpdate((e) => {
-      x.value = e.translationX;
-      y.value = e.translationY * 0.25;
+      // Dikey kaydırma: yatay kayma yalnızca hafif bir eğim için kullanılır.
+      y.value = e.translationY;
+      x.value = e.translationX * 0.25;
     })
     .onEnd((e) => {
-      if (Math.abs(e.translationX) > SWIPE_THRESHOLD) {
-        const direction: SwipeDirection = e.translationX > 0 ? 'right' : 'left';
-        const target = direction === 'right' ? flyOut : -flyOut;
-        x.value = withTiming(target, { duration: 180 }, (finished) => {
+      if (Math.abs(e.translationY) > SWIPE_THRESHOLD) {
+        const direction: SwipeDirection = e.translationY < 0 ? 'up' : 'down';
+        const target = direction === 'up' ? -flyOut : flyOut;
+        y.value = withTiming(target, { duration: 180 }, (finished) => {
           if (finished) runOnJS(commit)(direction);
         });
-        y.value = withTiming(0, { duration: 180 });
+        x.value = withTiming(0, { duration: 180 });
         return;
       }
       x.value = withSpring(0, { damping: 18 });
@@ -127,21 +130,22 @@ function SwipeDeckInner<T>(
       { translateX: x.value },
       { translateY: y.value },
       {
-        rotate: `${interpolate(x.value, [-flyOut, 0, flyOut], [-ROTATION_DEG, 0, ROTATION_DEG])}deg`,
+        rotate: `${interpolate(x.value, [-120, 0, 120], [-ROTATION_DEG, 0, ROTATION_DEG])}deg`,
       },
     ],
   }));
 
+  // Yukarı çekince olumlu damga, aşağı çekince "geç" damgası belirginleşir.
   const likeStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(x.value, [0, SWIPE_THRESHOLD], [0, 1], 'clamp'),
+    opacity: interpolate(y.value, [-SWIPE_THRESHOLD, 0], [1, 0], 'clamp'),
   }));
 
   const nopeStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(x.value, [-SWIPE_THRESHOLD, 0], [1, 0], 'clamp'),
+    opacity: interpolate(y.value, [0, SWIPE_THRESHOLD], [0, 1], 'clamp'),
   }));
 
   const nextStyle = useAnimatedStyle(() => {
-    const progress = interpolate(Math.abs(x.value), [0, SWIPE_THRESHOLD], [0, 1], 'clamp');
+    const progress = interpolate(Math.abs(y.value), [0, SWIPE_THRESHOLD], [0, 1], 'clamp');
     return {
       transform: [{ scale: 0.94 + progress * 0.06 }, { translateY: 12 - progress * 12 }],
       opacity: 0.6 + progress * 0.4,
@@ -167,24 +171,24 @@ function SwipeDeckInner<T>(
       <GestureDetector gesture={pan}>
         <Animated.View key={keyExtractor(current)} style={[styles.card, cardStyle]}>
           {renderCard(current)}
-          <Animated.View style={[styles.stamp, styles.stampRight, likeStyle]} pointerEvents="none">
+          <Animated.View style={[styles.stamp, styles.stampUp, likeStyle]} pointerEvents="none">
             <Text
-              style={[styles.stampText, styles.stampTextRight]}
+              style={[styles.stampText, styles.stampTextUp]}
               color={colors.profit}
               numberOfLines={1}
               adjustsFontSizeToFit
             >
-              {rightLabel}
+              {upLabel}
             </Text>
           </Animated.View>
-          <Animated.View style={[styles.stamp, styles.stampLeft, nopeStyle]} pointerEvents="none">
+          <Animated.View style={[styles.stamp, styles.stampDown, nopeStyle]} pointerEvents="none">
             <Text
-              style={[styles.stampText, styles.stampTextLeft]}
+              style={[styles.stampText, styles.stampTextDown]}
               color={colors.loss}
               numberOfLines={1}
               adjustsFontSizeToFit
             >
-              {leftLabel}
+              {downLabel}
             </Text>
           </Animated.View>
         </Animated.View>
@@ -219,8 +223,8 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     borderWidth: 3,
   },
-  stampRight: { borderColor: colors.profit, backgroundColor: 'rgba(22, 163, 74, 0.16)' },
-  stampLeft: { borderColor: colors.loss, backgroundColor: 'rgba(220, 38, 38, 0.16)' },
+  stampUp: { borderColor: colors.profit, backgroundColor: 'rgba(22, 163, 74, 0.16)' },
+  stampDown: { borderColor: colors.loss, backgroundColor: 'rgba(220, 38, 38, 0.16)' },
   stampText: {
     fontFamily: fontFamily.extraBold,
     fontSize: 44,
@@ -229,6 +233,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     textTransform: 'uppercase',
   },
-  stampTextRight: { transform: [{ rotate: '-18deg' }] },
-  stampTextLeft: { transform: [{ rotate: '18deg' }] },
+  stampTextUp: { transform: [{ rotate: '-18deg' }] },
+  stampTextDown: { transform: [{ rotate: '18deg' }] },
 });

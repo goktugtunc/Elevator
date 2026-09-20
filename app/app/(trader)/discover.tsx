@@ -3,7 +3,13 @@ import { Bookmark, Check, RotateCcw, X } from 'lucide-react-native';
 import { useCallback, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
-import { ListingCard, OfferSheet, SwipeDeck, type SwipeDeckHandle } from '@/components/discover';
+import {
+  ListingCard,
+  OfferSheet,
+  SwipeDeck,
+  type SwipeDeckHandle,
+  type SwipeDirection,
+} from '@/components/discover';
 import { Screen, ScreenHeader } from '@/components/layout';
 import { Button, Card, Text } from '@/components/ui';
 import { discoverApi, offersApi } from '@/lib/api';
@@ -50,9 +56,9 @@ export default function TraderDiscover() {
   });
 
   const onSwipe = useCallback(
-    (card: DiscoverCardOut, direction: 'left' | 'right') => {
+    (card: DiscoverCardOut, direction: SwipeDirection) => {
       setNotice(null);
-      if (direction === 'right') {
+      if (direction === 'up') {
         setOfferTarget(card);
         return;
       }
@@ -94,33 +100,35 @@ export default function TraderDiscover() {
             <Button title="Refresh" variant="secondary" onPress={() => feed.refetch()} />
           </Card>
         ) : (
-          <SwipeDeck<DiscoverCardOut>
-            key={deckKey}
-            ref={deckRef}
-            data={items}
-            keyExtractor={(c) => `${c.target_type}:${c.target_id}`}
-            renderCard={(c) => <ListingCard card={c} />}
-            onSwipe={onSwipe}
-            onTopChange={setTop}
-            rightLabel="OFFER"
-            renderEmpty={() => (
-              <Card style={styles.state}>
-                <Text variant="h2">That’s everyone for now</Text>
-                <Text variant="body" color="text2">
-                  You have seen every listing. Refresh to check for new ones.
-                </Text>
-                <Button
-                  title="Start over"
-                  variant="secondary"
-                  leftIcon={<RotateCcw size={16} color={colors.navy900} />}
-                  onPress={() => {
-                    setDeckKey((k) => k + 1);
-                    feed.refetch();
-                  }}
-                />
-              </Card>
-            )}
-          />
+          <View style={styles.deck}>
+            <SwipeDeck<DiscoverCardOut>
+              key={deckKey}
+              ref={deckRef}
+              data={items}
+              keyExtractor={(c) => `${c.target_type}:${c.target_id}`}
+              renderCard={(c) => <ListingCard card={c} />}
+              onSwipe={onSwipe}
+              onTopChange={setTop}
+              upLabel="OFFER"
+              renderEmpty={() => (
+                <Card style={styles.state}>
+                  <Text variant="h2">That’s everyone for now</Text>
+                  <Text variant="body" color="text2">
+                    You have seen every listing. Refresh to check for new ones.
+                  </Text>
+                  <Button
+                    title="Start over"
+                    variant="secondary"
+                    leftIcon={<RotateCcw size={16} color={colors.navy900} />}
+                    onPress={() => {
+                      setDeckKey((k) => k + 1);
+                      feed.refetch();
+                    }}
+                  />
+                </Card>
+              )}
+            />
+          </View>
         )}
 
         {notice ? (
@@ -132,31 +140,33 @@ export default function TraderDiscover() {
         ) : null}
 
         {items.length > 0 ? (
-          <View style={styles.actions}>
-            <ActionButton
-              label="Skip"
-              onPress={() => deckRef.current?.swipe('left')}
-              disabled={!top}
-              tint={colors.loss}
-            >
-              <X size={22} color={colors.loss} />
-            </ActionButton>
-            <ActionButton
-              label="Save"
-              onPress={() => top && save.mutate(top)}
-              disabled={!top || save.isPending}
-              tint={colors.navy900}
-            >
-              <Bookmark size={20} color={colors.navy900} />
-            </ActionButton>
-            <ActionButton
-              label="Make offer"
-              onPress={() => deckRef.current?.swipe('right')}
-              disabled={!top}
-              tint={colors.profit}
-            >
-              <Check size={22} color={colors.profit} />
-            </ActionButton>
+          <View style={styles.actionsWrap} pointerEvents="box-none">
+            <View style={styles.actions}>
+              <ActionButton
+                label="Skip"
+                onPress={() => deckRef.current?.swipe('down')}
+                disabled={!top}
+                tint={colors.loss}
+              >
+                <X size={22} color={colors.loss} />
+              </ActionButton>
+              <ActionButton
+                label="Save"
+                onPress={() => top && save.mutate(top)}
+                disabled={!top || save.isPending}
+                tint={colors.navy900}
+              >
+                <Bookmark size={20} color={colors.navy900} />
+              </ActionButton>
+              <ActionButton
+                label="Make offer"
+                onPress={() => deckRef.current?.swipe('up')}
+                disabled={!top}
+                tint={colors.profit}
+              >
+                <Check size={22} color={colors.profit} />
+              </ActionButton>
+            </View>
           </View>
         ) : null}
       </View>
@@ -227,7 +237,22 @@ const styles = StyleSheet.create({
   notice: { padding: spacing.md, borderRadius: radius.md },
   noticeOk: { backgroundColor: colors.greenBg },
   noticeErr: { backgroundColor: colors.redBg },
-  actions: { flexDirection: 'row', justifyContent: 'space-evenly', paddingTop: spacing.xs },
+  /**
+   * Aksiyonlar kartın altında yatay bir şerit değil, **sağ kenarda dikey bir
+   * sütun**: kaydırma dikey olduğu için parmağın doğal olarak durduğu yer burası
+   * ve kart alanı büyüyor. Deste üstünde yüzer, dokunuşlar sütun dışında karta
+   * geçsin diye kapsayıcı `box-none`.
+   */
+  /** Kart, sağdaki aksiyon sütununun altına girmesin diye sağdan pay alır. */
+  deck: { flex: 1, paddingRight: 72 },
+  actionsWrap: {
+    position: 'absolute',
+    right: spacing.sm,
+    top: 0,
+    bottom: 0,
+    justifyContent: 'center',
+  },
+  actions: { gap: spacing.lg, alignItems: 'center' },
   action: { alignItems: 'center', gap: spacing.xs },
   actionButton: {
     width: 56,
