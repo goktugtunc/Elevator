@@ -57,7 +57,7 @@ export function buildSignInUri(challengeXdr: string, address: string): string {
   return buildSep7TxUri({
     xdr: challengeXdr,
     callbackUrl: `${base}/api/v1/auth/sep7-callback`,
-    message: 'Sign in to TraderKirala',
+    message: 'Sign in to Elevator',
     pubkey: address,
     originDomain: hostOf(env.apiBaseUrl),
   });

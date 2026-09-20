@@ -34,16 +34,16 @@ const METHODS = ['stellar_signXDR', 'stellar_signAndSubmitXDR'];
 
 /**
  * Cüzdan imzadan sonra buraya geri döner. Expo Go'da uygulamanın kendi scheme'i
- * (traderkirala://) kayıtlı DEĞİLDİR; `Linking.createURL` Expo Go'da
- * `exp://<host>/--/` üretir, derlenmiş uygulamada `traderkirala://`.
+ * (elevator://) kayıtlı DEĞİLDİR; `Linking.createURL` Expo Go'da
+ * `exp://<host>/--/` üretir, derlenmiş uygulamada `elevator://`.
  */
 const RETURN_URL = ExpoLinking.createURL('/');
 
 const APP_METADATA = {
-  name: 'TraderKirala',
+  name: 'Elevator',
   description: 'Rent a trader, keep your capital on Stellar.',
-  url: 'https://traderkirala.app',
-  icons: ['https://traderkirala.app/icon.png'],
+  url: 'https://elevator.app',
+  icons: ['https://elevator.app/icon.png'],
   redirect: { native: RETURN_URL, universal: '' },
 };
 

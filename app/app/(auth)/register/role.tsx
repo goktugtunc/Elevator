@@ -50,7 +50,7 @@ export default function RegisterRole() {
       <View style={styles.body}>
         <Progress value={0.5} label="Step 1 of 2 · Choose your role" />
 
-        <Text variant="h1">How will you use TraderKirala?</Text>
+        <Text variant="h1">How will you use Elevator?</Text>
         <Text variant="body" color="text2">
           Pick your role now — it shapes your navigation and the screens you see.
         </Text>

@@ -96,7 +96,7 @@ ile Freighter mobile açılır.
 
 1. <https://dashboard.reown.com> (eski adıyla cloud.walletconnect.com) → **Sign up**
    (GitHub / Google / e-posta). Ücretsiz, kart istemez.
-2. **Create project** → ad: `TraderKirala`.
+2. **Create project** → ad: `Elevator`.
 3. Ürün sorulursa **AppKit** (dApp tarafı; cüzdan yapmıyoruz), platform **React Native**.
 4. Proje açılınca **Project ID** panoda görünür — 32 karakterlik hex. Kopyala.
 5. `app/.env` dosyasına yaz ve Metro'yu temiz başlat:
@@ -109,8 +109,8 @@ ile Freighter mobile açılır.
 
 **Allowlist tuzağı:** panodaki *Allowlist* alanına bundle id girerseniz Expo Go'da
 bağlantı reddedilir; çünkü Expo Go'nun kendi kimliği çalışır (`host.exp.Exponent` /
-`host.exp.exponent`), bizim `com.traderkirala.app` değil. Test aşamasında allowlist'i
-**boş bırakın**; derlenmiş uygulamaya geçince `com.traderkirala.app` ekleyin
+`host.exp.exponent`), bizim `com.elevator.app` değil. Test aşamasında allowlist'i
+**boş bırakın**; derlenmiş uygulamaya geçince `com.elevator.app` ekleyin
 (değişiklikler ~15 dakikada etkinleşir).
 
 Project ID istemci tarafında görünür bir değerdir (gizli anahtar değildir), ancak
@@ -137,5 +137,5 @@ Expo Go'da uygulamayı tamamen kapatıp yeniden açın.
 - Cüzdan **Testnet**'te olmalı; değilse "wallet is on a different network" uyarısı çıkar.
 - Expo Go'ya yeni bir native bağımlılık eklenirse (ör. `react-native-quick-crypto`)
   bu akış kırılır ve development build gerekir.
-- Expo Go'da uygulamanın kendi scheme'i (`traderkirala://`) kayıtlı değildir; dönüş
+- Expo Go'da uygulamanın kendi scheme'i (`elevator://`) kayıtlı değildir; dönüş
   adresi bu yüzden `Linking.createURL('/')` ile üretilir (Expo Go'da `exp://.../--/`).

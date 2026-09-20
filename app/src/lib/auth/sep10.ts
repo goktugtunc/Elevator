@@ -7,7 +7,7 @@ import { stellarConfig } from '@/lib/stellar';
 import { wallet } from '@/lib/wallet';
 
 /**
- * SEP-10 giriş akışı — TraderKirala API:
+ * SEP-10 giriş akışı — Elevator API:
  *   1. `GET  /api/v1/auth/sep10?account=G…` → challenge XDR
  *   2. Challenge doğrulanır (körlemesine imza yok)
  *   3. Cüzdan imzalar

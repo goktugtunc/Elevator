@@ -1,9 +1,9 @@
 {
   "expo": {
-    "name": "TraderKirala",
-    "slug": "traderkirala",
+    "name": "Elevator",
+    "slug": "elevator",
     "version": "0.1.0",
-    "scheme": "traderkirala",
+    "scheme": "elevator",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -15,10 +15,10 @@
     },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.traderkirala.app"
+      "bundleIdentifier": "com.elevator.app"
     },
     "android": {
-      "package": "com.traderkirala.app",
+      "package": "com.elevator.app",
       "adaptiveIcon": {
         "backgroundColor": "#0B1F3A",
         "foregroundImage": "./assets/android-icon-foreground.png",

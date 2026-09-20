@@ -1,5 +1,5 @@
 /**
- * TraderKirala API tipleri.
+ * Elevator API tipleri.
  *
  * Gövde `./schema.ts` içinde **üretilir** (kaynak: sunucunun `/openapi.json`),
  * bu dosya yalnızca yeniden dışa aktarır. Elle tip eklemeyin — sunucu şeması

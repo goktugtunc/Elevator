@@ -74,7 +74,7 @@ import type {
 } from './types';
 
 /**
- * TraderKirala API — <https://mobilback.yolalapp.com> (92 uç, şema: /openapi.json).
+ * Elevator API — <https://mobilback.yolalapp.com> (92 uç, şema: /openapi.json).
  * Tüm uçlar `/api/v1` öneki altında; `/health` önek dışındadır.
  *
  * Tipler `./schema.ts` içinde sunucunun OpenAPI şemasından üretilir; buradaki

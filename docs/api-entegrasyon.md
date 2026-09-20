@@ -1,4 +1,4 @@
-# API entegrasyonu — TraderKirala API
+# API entegrasyonu — Elevator API
 
 **Sunucu:** <https://mobilback.yolalapp.com> · **Şema:** `/docs`, `/openapi.json` (92 uç)
 **Base URL:** `https://mobilback.yolalapp.com/api/v1` (`.env → EXPO_PUBLIC_API_BASE_URL` origin alır, öneki kod ekler)

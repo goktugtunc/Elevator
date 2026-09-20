@@ -83,7 +83,7 @@ function easProjectId(): string | null {
 async function ensureAndroidChannel(n: Notifications): Promise<void> {
   if (Platform.OS !== 'android') return;
   await n.setNotificationChannelAsync('default', {
-    name: 'TraderKirala',
+    name: 'Elevator',
     importance: n.AndroidImportance.DEFAULT,
     lightColor: colors.navy900,
   });

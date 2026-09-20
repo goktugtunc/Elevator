@@ -6,7 +6,7 @@
 
 ## Backend
 
-**Canlı ve tamamlandı:** <https://mobilback.yolalapp.com> — _TraderKirala API 1.0.0_, **92 uç**.
+**Canlı ve tamamlandı:** <https://mobilback.yolalapp.com> — _Elevator API 1.0.0_, **92 uç**.
 Şema: `/docs` · `/openapi.json`. Backend ayrı bir depoda geliştiriliyor; bu repoda `backend/` klasörü yok.
 
 - **Base URL:** `https://mobilback.yolalapp.com/api/v1` (`.env` origin alır, öneki kod ekler). `/health` önek dışında.

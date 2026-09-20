@@ -76,7 +76,7 @@ Kaynak: Risein Stellar Pro Hackathon görev sayfaları (Submission Criteria, Jud
 
 ### 4.1 Proje ve dağıtım
 - Expo + React Native. **Birincil hedef Expo Web** (`react-native-web`), herkese açık URL'ye deploy.
-- İkincil hedef mobil: `expo-dev-client` + EAS Build. `app.json` içinde benzersiz `scheme` (`traderkirala`).
+- İkincil hedef mobil: `expo-dev-client` + EAS Build. `app.json` içinde benzersiz `scheme` (`elevator`).
 - Expo Go yalnızca cüzdansız arayüz ekranları için. Cüzdanlı işler development build'de veya web'de test edilir.
 - Hedef sürüm Expo SDK 57 (eski notlardan gelen bilgi, Risein'de yok, kurulumdan önce doğrulanmalı).
 

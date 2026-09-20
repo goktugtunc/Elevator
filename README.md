@@ -1,10 +1,10 @@
-# TraderKirala
+# Elevator
 
 **Capital that can be traded but never taken.**
 
 People with savings hand money to traders on trust — a WhatsApp group, a screenshot
 of a winning month, a promise. The saver has no custody, no proof and no way out.
-TraderKirala gives that arrangement a contract: the capital sits in a Soroban vault,
+Elevator gives that arrangement a contract: the capital sits in a Soroban vault,
 the trader can swap it but never withdraw it, every trade is bounded by a max-loss
 floor the contract enforces, and settlement is arithmetic rather than a promise.
 
@@ -21,7 +21,7 @@ Built for the **Risein Stellar Pro Hackathon**, 19–20 September 2026.
 |---|---|
 | **Vault contract** | [`CCGAGVFFTH2IIH6WW2E52VVR5TJJFP3OL7HDZUZ2WQ7MT4Z57GA7NAG2`](https://stellar.expert/explorer/testnet/contract/CCGAGVFFTH2IIH6WW2E52VVR5TJJFP3OL7HDZUZ2WQ7MT4Z57GA7NAG2) |
 | Network | Stellar **Testnet** (`Test SDF Network ; September 2015`) |
-| Contract version | `1.2.0` · wasm `b7fdc81accd2e32c80140831b1c09ce180c78e4889d671aacd6da59de766fb87` |
+| Contract version | `1.2.0` · wasm `ec5da54f94abc9937cc645d882e5f7cea14830a9bbae787e632b8ed1cf8b9d48` |
 | Deploy tx | [`857d882e…`](https://stellar.expert/explorer/testnet/tx/857d882ec95b0126aa79f8ccd8d01f6ed974d64bf31150e6846294df28a940ab) |
 | Upgrade tx (v1.2.0) | [`89740261…`](https://stellar.expert/explorer/testnet/tx/897402619031058c103e887ca53ed51fa9e0e9a4eac089475dd1c8a3b3d9f54d) |
 | Soroswap router | `CCJUD55AG6W5HAI5LRVNKAE5WDP5XGZBUDS5WNTIVDU7O264UZZE7BRD` |
@@ -206,7 +206,7 @@ compensating there pushed sheets a keyboard-height too high.
 ## Repository layout
 
 ```
-traderkirala/
+elevator/
 ├── app/          Expo + React Native client (this repository)
 │   ├── app/          Screens (expo-router)
 │   ├── src/          Components, API client, wallet adapter, stores
@@ -243,8 +243,8 @@ Checks: `npm run check` (TypeScript + ESLint), `npm run typecheck`, `npm run lin
 
 ```bash
 cd contracts
-stellar contract build --package traderkirala_vault
-cargo test --package traderkirala_vault        # 47 tests
+stellar contract build --package elevator_vault
+cargo test --package elevator_vault        # 47 tests
 ```
 
 Deploy and allow-list tokens: `scripts/deploy_contract.sh testnet`.
