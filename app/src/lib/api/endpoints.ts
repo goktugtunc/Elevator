@@ -58,6 +58,7 @@ import type {
   TraderProfileOut,
   TradeOut,
   TradeTxIn,
+  TxSubmitIn,
   TxSubmitOut,
   UnreadCountOut,
   UnsignedTxOut,
@@ -270,8 +271,16 @@ export const tradesApi = {
 
 // --- İmzalı işlem gönderimi ---
 export const txApi = {
-  submit: (signedXdr: string, pendingId?: string) =>
-    http.post<TxSubmitOut>(`${V1}/tx/submit`, { xdr: signedXdr, pending_id: pendingId }),
+  /**
+   * İmzalı zarfı sunucuya verir. Alan adları sözleşmeyle birebir aynı olmalı:
+   * `xdr`/`pending_id` gönderildiğinde sunucu 422 döndürüyordu ve bu her zincir
+   * işlemini (yatırma, fonlama, işlem açma, kapanış) sessizce kırıyordu.
+   */
+  submit: (signedXdr: string, pendingId: string) =>
+    http.post<TxSubmitOut>(`${V1}/tx/submit`, {
+      signed_xdr: signedXdr,
+      pending_tx_id: pendingId,
+    } satisfies TxSubmitIn),
   status: (pendingId: string) => http.get<PendingTxOut>(`${V1}/tx/${pendingId}`),
 };
 

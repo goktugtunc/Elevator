@@ -14,6 +14,11 @@ import { WalletError } from '@/lib/wallet/types';
  * (ağ hatası, oturum süresi) kendi metnimizi koyuyoruz.
  */
 export function userMessage(err: unknown): string {
+  // Zaten kullanıcıya gösterilmek üzere çevrilmiş bir metin geldiyse onu koru.
+  // `useOnchainAction` gibi yerler hatayı metne çevirip veriyor; ikinci kez
+  // buradan geçince ağ/cüzdan mesajı genel "Something went wrong"a düşüyordu.
+  if (typeof err === 'string') return err;
+
   if (err instanceof WalletError) {
     switch (err.code) {
       case 'USER_REJECTED':

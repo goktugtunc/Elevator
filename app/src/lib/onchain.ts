@@ -62,12 +62,17 @@ export function useOnchainAction({
     },
     onSuccess: (res) => {
       setPhase('done');
-      if (res.ok) {
-        for (const key of invalidate ?? []) void qc.invalidateQueries({ queryKey: key });
-      }
+      // Başarısızlıkta da tazelenir: cüzdan imzaladığı işlemi kendisi de
+      // yayınlayabildiği için "gönderemedim" demek "zincirde olmadı" demek
+      // değil. Tazelemezsek ekran, zincirde çoktan olmuş bir şeyi olmamış
+      // gibi gösteriyor ve kullanıcı ikinci kez denemeye çalışıyor.
+      for (const key of invalidate ?? []) void qc.invalidateQueries({ queryKey: key });
       onSuccess?.(res);
     },
-    onError: () => setPhase('idle'),
+    onError: () => {
+      setPhase('idle');
+      for (const key of invalidate ?? []) void qc.invalidateQueries({ queryKey: key });
+    },
   });
 
   return {
