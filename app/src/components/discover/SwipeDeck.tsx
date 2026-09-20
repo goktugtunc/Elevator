@@ -20,7 +20,7 @@ import Animated, {
 } from 'react-native-reanimated';
 
 import { Text } from '@/components/ui';
-import { colors, layout, radius, spacing } from '@/theme';
+import { colors, fontFamily, layout, radius } from '@/theme';
 
 /**
  * Keşfet destesi (FE-05) — Figma 2a–2d "Swipe Card".
@@ -168,12 +168,22 @@ function SwipeDeckInner<T>(
         <Animated.View key={keyExtractor(current)} style={[styles.card, cardStyle]}>
           {renderCard(current)}
           <Animated.View style={[styles.stamp, styles.stampRight, likeStyle]} pointerEvents="none">
-            <Text variant="captionStrong" color={colors.profit}>
+            <Text
+              style={[styles.stampText, styles.stampTextRight]}
+              color={colors.profit}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+            >
               {rightLabel}
             </Text>
           </Animated.View>
           <Animated.View style={[styles.stamp, styles.stampLeft, nopeStyle]} pointerEvents="none">
-            <Text variant="captionStrong" color={colors.loss}>
+            <Text
+              style={[styles.stampText, styles.stampTextLeft]}
+              color={colors.loss}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+            >
               {leftLabel}
             </Text>
           </Animated.View>
@@ -192,15 +202,33 @@ const styles = StyleSheet.create({
   wrap: { flex: 1, justifyContent: 'center' },
   card: { width: '100%' },
   behind: { position: 'absolute', left: 0, right: 0 },
+  /**
+   * Seçim damgası kartın **tamamını** kaplar ve yazı çapraz durur: köşedeki
+   * küçük rozet, kaydırma sırasında hangi seçimin yapıldığını yeterince net
+   * göstermiyordu. Renk tonu da karta yayılıyor, karar bir bakışta okunuyor.
+   */
   stamp: {
     position: 'absolute',
-    top: spacing.lg,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs + 2,
-    borderRadius: radius.sm,
-    borderWidth: 2,
-    backgroundColor: colors.surface,
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+    borderRadius: radius.md,
+    borderWidth: 3,
   },
-  stampRight: { right: spacing.lg, borderColor: colors.profit },
-  stampLeft: { left: spacing.lg, borderColor: colors.loss },
+  stampRight: { borderColor: colors.profit, backgroundColor: 'rgba(22, 163, 74, 0.16)' },
+  stampLeft: { borderColor: colors.loss, backgroundColor: 'rgba(220, 38, 38, 0.16)' },
+  stampText: {
+    fontFamily: fontFamily.extraBold,
+    fontSize: 44,
+    lineHeight: 52,
+    letterSpacing: 2,
+    textAlign: 'center',
+    textTransform: 'uppercase',
+  },
+  stampTextRight: { transform: [{ rotate: '-18deg' }] },
+  stampTextLeft: { transform: [{ rotate: '18deg' }] },
 });
