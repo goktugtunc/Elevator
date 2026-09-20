@@ -3,7 +3,7 @@ import * as Clipboard from 'expo-clipboard';
 import * as WebBrowser from 'expo-web-browser';
 import { Copy, ExternalLink } from 'lucide-react-native';
 import { useState } from 'react';
-import { Linking, StyleSheet, View } from 'react-native';
+import { Linking, Pressable, StyleSheet, View } from 'react-native';
 
 import { AsyncBoundary, EmptyState, Screen, TopBar } from '@/components/layout';
 import {
@@ -21,6 +21,8 @@ import {
 import { anchorApi, walletApi } from '@/lib/api';
 import type {
   AnchorTransactionOut,
+  InstructionOut,
+  InteractiveOut,
   MissingTrustlineOut,
   MovementOut,
   WalletBalanceOut,
@@ -28,6 +30,7 @@ import type {
 import { userMessage } from '@/lib/errors';
 import { formatRelative, parseNumberInput } from '@/lib/format';
 import { phaseLabel, useOnchainAction } from '@/lib/onchain';
+import { wallet as walletSigner } from '@/lib/wallet';
 import { explorerAccountUrl, explorerTxUrl, shortAddress } from '@/lib/stellar';
 import { useSession } from '@/store/session';
 import { colors, pnlColor, radius, spacing } from '@/theme';
@@ -39,7 +42,8 @@ type Kind = 'deposit' | 'withdraw';
  * Figma 8c · Cüzdan (node 27:699) — `GET /wallet`, `/wallet/deposit-info`,
  * `/anchor/*`.
  *
- * TRY yatırma/çekme SEP-24 interactive akışıyla yürür: sunucu anchor'dan bir
+ * TRY yatırma/çekme anchor'ın sunduğu protokole göre iki biçimde yürür.
+ * SEP-24'te sunucu anchor'dan bir
  * URL alır, uygulama onu sistem tarayıcısında açar (asla iframe'de), dönüşte
  * işlem durumu sorgulanır. Çekimde anchor'a yapılacak ödeme yine cüzdanda
  * imzalanır.
@@ -61,8 +65,20 @@ export default function Wallet() {
   const depositInfo = useQuery({
     queryKey: ['wallet', 'deposit-info'],
     queryFn: walletApi.depositInfo,
-    enabled: transferKind === 'deposit',
+    // Varlık listesi hem yatırmada hem çekimde lazım (asset_code zorunlu alan).
+    enabled: transferKind !== null,
   });
+
+  /** SEP-6'da açılacak bir anchor sayfası yok; metinler buna göre değişiyor. */
+  const isSep6 = depositInfo.data?.anchor_protocol === 'sep6';
+
+  const anchorAssets = depositInfo.data?.anchor_assets ?? [];
+  /**
+   * Gönderilecek varlık. Kullanıcı seçmediyse tek varlık varsa o kullanılır:
+   * seçilmeden gönderildiğinde sunucu `asset_code` alanı için 422 veriyordu ve
+   * kullanıcı tek seçenekli bir listede neyi seçeceğini anlamıyordu.
+   */
+  const effectiveAsset = assetCode ?? (anchorAssets.length === 1 ? anchorAssets[0].code : null);
 
   const anchorTxs = useQuery({
     queryKey: ['anchor', 'transactions'],
@@ -76,11 +92,29 @@ export default function Wallet() {
     void qc.invalidateQueries({ queryKey: ['dashboard'] });
   };
 
+  /**
+   * Anchor ile SEP-10 oturumu. Yatırma/çekme uçları anchor'ın kendi JWT'sini
+   * istiyor; oturum yoksa sunucu `anchor_auth_required` döndürüyor. Challenge'ı
+   * sunucu doğruluyor, cüzdan imzalıyor, JWT sunucuda kalıyor — uygulamaya hiç
+   * gelmiyor.
+   */
+  const ensureAnchorSession = async () => {
+    const current = await anchorApi.session().catch(() => null);
+    if (current?.authenticated) return;
+    const challenge = await anchorApi.challenge();
+    const signed = await walletSigner.signTransaction(challenge.transaction, {
+      networkPassphrase: challenge.network_passphrase,
+      address: challenge.account,
+    });
+    await anchorApi.token(signed);
+  };
+
   const transfer = useMutation({
     mutationFn: async () => {
+      await ensureAnchorSession();
       const value = parseNumberInput(amount);
       const payload = {
-        asset_code: assetCode,
+        asset_code: effectiveAsset,
         amount: value !== null ? String(value) : undefined,
       };
       return transferKind === 'deposit'
@@ -88,15 +122,37 @@ export default function Wallet() {
         : anchorApi.withdraw(payload);
     },
     onSuccess: async (res) => {
+      // SEP-24: anchor kendi sayfasını açar, gerisi orada.
       if (res.interactive_url) {
         await WebBrowser.openBrowserAsync(res.interactive_url);
+        setTransferKind(null);
+        setAmount('');
+        refreshWallet();
+        setTab('transfers');
+        return;
       }
-      setTransferKind(null);
-      setAmount('');
+      // SEP-6: açılacak sayfa yok; talimatlar yanıtın kendisinde geliyor, panelde gösterilir.
+      setStarted(res);
       refreshWallet();
-      setTab('transfers');
     },
   });
+
+  /** SEP-6 akışında anchor'ın verdiği talimatlar (yatırmada banka, çekimde adres+memo). */
+  const [started, setStarted] = useState<InteractiveOut | null>(null);
+
+  /** Çekimde anchor'a yapılacak USDC ödemesi. */
+  const withdrawPayment = useOnchainAction({
+    build: () => anchorApi.buildWithdrawPaymentTx(started?.id ?? ''),
+    invalidate: [['wallet'], ['anchor']],
+  });
+
+  const closeTransfer = () => {
+    setTransferKind(null);
+    setAmount('');
+    setStarted(null);
+    withdrawPayment.reset();
+    transfer.reset();
+  };
 
   const fundAccount = useMutation({
     mutationFn: async (url: string) => {
@@ -274,34 +330,60 @@ export default function Wallet() {
 
       <BottomSheet
         visible={transferKind !== null}
-        onClose={() => setTransferKind(null)}
+        onClose={closeTransfer}
         title={transferKind === 'deposit' ? 'Deposit TRY' : 'Withdraw'}
         subtitle={
-          transferKind === 'deposit'
-            ? 'The anchor collects your bank details and issues the asset to your wallet.'
-            : 'The anchor pays out to your bank account once you send the asset back.'
+          started
+            ? undefined
+            : transferKind === 'deposit'
+              ? 'You send TRY to the anchor, it issues the asset to your wallet.'
+              : 'The anchor pays out to your bank account once you send the asset back.'
         }
         footer={
-          <Button
-            title={transferKind === 'deposit' ? 'Continue to the anchor' : 'Start withdrawal'}
-            fullWidth
-            loading={transfer.isPending}
-            onPress={() => transfer.mutate()}
-          />
+          started ? (
+            started.kind === 'withdraw' && started.deposit_account ? (
+              <Button
+                title="Send the payment"
+                fullWidth
+                loading={withdrawPayment.busy}
+                onPress={withdrawPayment.run}
+              />
+            ) : (
+              <Button title="Done" variant="secondary" fullWidth onPress={closeTransfer} />
+            )
+          ) : (
+            <Button
+              title={transferKind === 'deposit' ? 'Continue to the anchor' : 'Start withdrawal'}
+              fullWidth
+              loading={transfer.isPending}
+              disabled={!effectiveAsset}
+              onPress={() => transfer.mutate()}
+            />
+          )
         }
       >
+        {started ? (
+          <TransferInstructions
+            started={started}
+            payment={withdrawPayment}
+            onDone={() => {
+              closeTransfer();
+              setTab('transfers');
+            }}
+          />
+        ) : (
         <View style={styles.sheet}>
-          {transferKind === 'deposit' && depositInfo.data ? (
+          {depositInfo.data ? (
             <View style={styles.group}>
               <Text variant="captionStrong" color="text2">
                 Asset
               </Text>
               <View style={styles.chips}>
-                {(depositInfo.data.anchor_assets ?? []).map((a) => (
+                {anchorAssets.map((a) => (
                   <Chip
                     key={a.code}
                     label={a.display_code}
-                    active={assetCode === a.code}
+                    active={effectiveAsset === a.code}
                     onPress={() => setAssetCode(a.code)}
                   />
                 ))}
@@ -327,11 +409,111 @@ export default function Wallet() {
           ) : null}
 
           <Text variant="caption" color="text3">
-            The anchor screen opens in your browser. Your secret key is never shared with it.
+            {isSep6
+              ? 'The anchor answers with the transfer details; you complete them in your own bank. Your secret key is never shared with it.'
+              : 'The anchor screen opens in your browser. Your secret key is never shared with it.'}
           </Text>
         </View>
+        )}
       </BottomSheet>
     </Screen>
+  );
+}
+
+/**
+ * SEP-6'da anchor'ın verdiği talimatlar.
+ *
+ * Yatırmada para zincirde değil bankada hareket ediyor: kullanıcı IBAN'a havale
+ * yapar ve açıklamaya anchor'ın verdiği referansı yazar — referans yanlışsa para
+ * kullanıcının hesabına bağlanamaz, o yüzden satırlar tek tek kopyalanabilir.
+ *
+ * Çekimde ise tersi: USDC anchor'ın adresine **tam olarak** verilen memo ile
+ * gönderilir. Memo eksikse anchor ödemeyi kimin yaptığını bilemez.
+ */
+function TransferInstructions({
+  started,
+  payment,
+  onDone,
+}: {
+  started: InteractiveOut;
+  payment: ReturnType<typeof useOnchainAction>;
+  onDone: () => void;
+}) {
+  const rows: { label: string; value: string; hint?: string }[] =
+    started.kind === 'withdraw'
+      ? [
+          ...(started.deposit_account
+            ? [{ label: 'Anchor account', value: started.deposit_account }]
+            : []),
+          ...(started.memo
+            ? [
+                {
+                  label: `Memo (${started.memo_type ?? 'text'})`,
+                  value: started.memo,
+                  hint: 'Must be exactly this, or the anchor cannot match your payment.',
+                },
+              ]
+            : []),
+        ]
+      : (started.instructions ?? []).map((i: InstructionOut) => ({
+          label: i.name.replace(/_/g, ' '),
+          value: i.value,
+          hint: i.description || undefined,
+        }));
+
+  return (
+    <View style={styles.sheet}>
+      {started.how ? (
+        <Text variant="body" color="text2">
+          {started.how}
+        </Text>
+      ) : null}
+
+      {rows.map((row) => (
+        <Pressable
+          key={row.label}
+          accessibilityRole="button"
+          accessibilityLabel={`Copy ${row.label}`}
+          onPress={() => Clipboard.setStringAsync(row.value)}
+          style={styles.instructionRow}
+        >
+          <Text variant="caption" color="text3">
+            {row.label}
+          </Text>
+          <Text variant="bodyStrong" selectable>
+            {row.value}
+          </Text>
+          {row.hint ? (
+            <Text variant="caption" color="text3">
+              {row.hint}
+            </Text>
+          ) : null}
+        </Pressable>
+      ))}
+
+      {started.fee_percent ? (
+        <Text variant="caption" color="text3">
+          Anchor fee: {started.fee_percent}%
+          {started.eta_seconds ? ` · usually ${Math.round(started.eta_seconds / 60) || 1} min` : ''}
+        </Text>
+      ) : null}
+
+      {started.note ? (
+        <Text variant="caption" color="text3">
+          {started.note}
+        </Text>
+      ) : null}
+
+      {payment.error ? <ErrorNotice title="Payment failed" error={payment.error} /> : null}
+      {payment.busy ? (
+        <Text variant="caption" color="text2">
+          {phaseLabel(payment.phase)}
+        </Text>
+      ) : null}
+      {payment.result?.ok ? (
+        <Button title="Done" variant="secondary" onPress={onDone} />
+      ) : null}
+    </View>
   );
 }
 
@@ -519,5 +701,12 @@ const styles = StyleSheet.create({
   sheet: { gap: spacing.md },
   group: { gap: spacing.sm },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  instructionRow: {
+    gap: 2,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    backgroundColor: colors.bg,
+    width: '100%',
+  },
   errorBox: { padding: spacing.md, borderRadius: radius.md, backgroundColor: colors.redBg },
 });

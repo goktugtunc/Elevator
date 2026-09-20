@@ -3,6 +3,8 @@ import type {
   AgreementOut,
   AnchorInfoOut,
   AnchorSessionOut,
+  TokenIn,
+  ChallengeOut,
   AnchorTransactionListOut,
   AnchorTransactionOut,
   AssetOut,
@@ -325,6 +327,11 @@ export const walletApi = {
 export const anchorApi = {
   info: (lang?: string) => http.get<AnchorInfoOut>(`${V1}/anchor/info`, { lang }),
   session: () => http.get<AnchorSessionOut>(`${V1}/anchor/auth/session`),
+  /** Anchor'ın imzalattığı SEP-10 challenge'ı (sunucu doğrular, cüzdan imzalar). */
+  challenge: () => http.post<ChallengeOut>(`${V1}/anchor/auth/challenge`, {}),
+  /** İmzalı challenge → anchor oturumu. JWT sunucuda kalır, uygulamaya gelmez. */
+  token: (signedXdr: string) =>
+    http.post<AnchorSessionOut>(`${V1}/anchor/auth/token`, { signed_xdr: signedXdr } satisfies TokenIn),
   /** SEP-24 interactive URL döner; `expo-web-browser` ile açılır. */
   deposit: (payload: Record<string, unknown>) =>
     http.post<InteractiveOut>(`${V1}/anchor/deposit`, payload),

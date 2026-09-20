@@ -409,6 +409,8 @@ export interface DepositInfoOut {
   anchor_enabled: boolean;
   anchor_home_domain: string;
   anchor_assets?: DepositInfoAssetOut[];
+  /** sep24 (anchor opens its own web page) or sep6 (the anchor answers with instructions) */
+  anchor_protocol?: string | null;
   anchor_error?: string | null;
 }
 
@@ -498,6 +500,13 @@ export interface FxOut {
   note: string;
 }
 
+/** One line of the anchor's off-chain instructions (SEP-6 ``instructions``). */
+export interface InstructionOut {
+  name: string;
+  value: string;
+  description?: string;
+}
+
 export type InteractionAction = "pass" | "like" | "save" | "follow" | "view" | "offer_request";
 
 export type InteractionTargetType = "listing" | "user";
@@ -516,19 +525,33 @@ export interface InteractiveIn {
   skip_trustline_check?: boolean;
 }
 
+/** A started deposit / withdrawal. Two shapes, by protocol. SEP-24 gives an ``interactive_url`` the … */
 export interface InteractiveOut {
   id: string;
   anchor_tx_id: string;
   kind: AnchorTxKind;
   status: string;
   type?: string;
-  /** open in a system webview / popup, never an iframe */
-  interactive_url: string;
+  /** SEP-24 only: open in a system webview / popup, never an iframe */
+  interactive_url?: string | null;
   asset_code: string;
   asset_issuer?: string | null;
   amount?: string | null;
   action: "open_interactive" | "send_payment" | "add_trustline" | "wait" | "none" | "retry";
   action_label: string;
+  /** SEP-6 deposit: instructions in one sentence */
+  how?: string | null;
+  /** SEP-6 deposit: the same, as rows */
+  instructions?: InstructionOut[];
+  /** SEP-6 withdrawal: pay this account */
+  deposit_account?: string | null;
+  /** SEP-6 withdrawal: exactly this memo, or the money is lost */
+  memo?: string | null;
+  memo_type?: string | null;
+  eta_seconds?: number | null;
+  fee_percent?: string | null;
+  /** anchor's own extra_info message */
+  note?: string | null;
 }
 
 export interface KycIn {

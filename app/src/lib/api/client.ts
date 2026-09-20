@@ -51,10 +51,12 @@ interface RequestOptions {
   query?: QueryParams;
   /** İçeride kullanılır: 401 sonrası tekrar denemede sonsuz döngüyü engeller. */
   retried?: boolean;
+  /** İçeride kullanılır: ağ hatasında yalnızca bir kez yeniden denenir. */
+  networkRetried?: boolean;
 }
 
 async function request<T>(method: Method, path: string, options: RequestOptions = {}): Promise<T> {
-  const { body, auth = true, query, retried = false } = options;
+  const { body, auth = true, query, retried = false, networkRetried = false } = options;
   // Not: `new URL(path, base)` taban yolundaki öneki (/api/v1) yutar; elle birleştiriyoruz.
   const url = new URL(`${env.apiBaseUrl.replace(/\/+$/, '')}${path}`);
   if (query) {
@@ -78,6 +80,15 @@ async function request<T>(method: Method, path: string, options: RequestOptions 
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
   } catch (err) {
+    // Cüzdan uygulamasından dönüldüğü anda Android ilk isteği düzenli olarak
+    // "UnknownHostException" ile düşürüyor; ağ birkaç yüz milisaniye sonra
+    // geri geliyor. Tek bir yeniden deneme, imzalanmış işlemin gönderiminin
+    // bu yüzden kaybolmasını engelliyor. İkinci kez düşerse hata gerçektir.
+    if (!networkRetried) {
+      debugLog('api', `${method} ${url.pathname} — ağ düştü, bir kez yeniden deneniyor`);
+      await new Promise((r) => setTimeout(r, 600));
+      return request<T>(method, path, { ...options, networkRetried: true });
+    }
     debugError('api', `${method} ${url.pathname} — sunucuya ulaşılamadı`, err);
     throw new ApiError(0, err instanceof Error ? err.message : `${method} ${path} failed`);
   }
