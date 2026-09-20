@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
-import { Plus } from 'lucide-react-native';
+import { Bookmark, Plus } from 'lucide-react-native';
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
@@ -70,6 +70,18 @@ export function MyListings({ role }: { role: UserRole }) {
         right={
           <View style={styles.headerActions}>
             <HeaderActions />
+            {/*
+              Kaydedilenler ayrı bir ekranda: aşağıdaki sekmeler kendi ilanlarımın
+              durumları, kaydedilenler ise başkalarının ilanları — aynı satıra
+              konsa ikisi karışırdı.
+            */}
+            <Button
+              title="Saved"
+              variant="secondary"
+              size="sm"
+              onPress={() => router.push('/listing/saved')}
+              leftIcon={<Bookmark size={16} color={colors.navy900} />}
+            />
             <Button
               title="New"
               size="sm"
