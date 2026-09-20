@@ -13,6 +13,7 @@
  * Bu yol reown relay'ine bağlıdır; proje kimliği yoksa kapalı kalır
  * (bkz. ./wallet.ts).
  */
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ExpoLinking from 'expo-linking';
 import { UniversalProvider } from '@walletconnect/universal-provider';
 import { Linking } from 'react-native';
@@ -47,7 +48,21 @@ const APP_METADATA = {
   redirect: { native: RETURN_URL, universal: '' },
 };
 
-let providerPromise: Promise<Provider> | null = null;
+/**
+ * Sağlayıcı **süreç başına tek** olmalı ve bu yüzden modül değişkeninde değil
+ * `globalThis`'te tutuluyor.
+ *
+ * Fast Refresh bu modülü yeniden çalıştırdığında modül düzeyindeki değişken
+ * sıfırlanıyor ve ikinci bir WalletConnect Core kuruluyor; eskisi relay'e abone
+ * kalmaya devam ediyor. O andan sonra her mesaj iki istemciye birden düşüyor:
+ * biri isteği yapan, öbürü hiçbir şey bilmeyen. Kütüphanenin
+ * "Init() was called N times", "No matching key" ve
+ * "emitting session_request:… without any listeners" uyarıları bunun sonucu —
+ * ve imza yanıtı yanlış örneğe düştüğü için giriş hiç tamamlanmıyordu.
+ */
+const PROVIDER_KEY = '__elevatorWalletConnectProvider';
+
+type ProviderHolder = { [PROVIDER_KEY]?: Promise<Provider> };
 
 function requireProjectId(): string {
   if (!env.walletConnectProjectId) {
@@ -60,13 +75,16 @@ function requireProjectId(): string {
 }
 
 async function getProvider(): Promise<Provider> {
-  if (!providerPromise) {
-    providerPromise = UniversalProvider.init({
+  const holder = globalThis as unknown as ProviderHolder;
+  if (!holder[PROVIDER_KEY]) {
+    // Önceki oturumdan kalan çöp varsa istemci kurulmadan ÖNCE silinir.
+    await purgeWalletConnectStorageIfMarked();
+    holder[PROVIDER_KEY] = UniversalProvider.init({
       projectId: requireProjectId(),
       metadata: APP_METADATA,
     });
   }
-  return providerPromise;
+  return holder[PROVIDER_KEY];
 }
 
 /** "stellar:testnet:GABC…" → "GABC…" */
@@ -105,17 +123,69 @@ async function forgetSession(provider: Provider): Promise<void> {
       .catch(() => undefined);
   }
   (provider as unknown as { session?: unknown }).session = undefined;
+  // Abonelikler, eşleşmeler ve JSON-RPC geçmişi hâlâ depoda; relay o konu için
+  // birikmiş mesajları göndermeyi sürdürüyor ve hiçbiri artık çözülemiyor.
+  // Bir sonraki açılışta temiz başlansın.
+  await markStorageForPurge();
 }
 
 /**
- * Kayıtlı oturum gerçekten ayakta mı?
+ * WalletConnect'in AsyncStorage'daki her şeyini siler ve istemciyi düşürür.
  *
- * Süresi dolmuşsa relay'e sormaya gerek yok. Değilse `ping` atılır: cevap
- * gelmezse oturum relay tarafında yok demektir. İmza isteğinin ortasında
- * öğrenmektense burada öğrenmek daha iyi — orada kullanıcı cüzdanı açmış,
- * beklemiş ve eli boş dönmüş oluyor.
+ * Oturum kaydını silmek yetmiyor. Geriye eşleşmeler, abonelikler, JSON-RPC
+ * geçmişi ve relay'in kuyruğu kalıyor; istemci ölü konuya abone kalmaya devam
+ * ediyor. Relay o konu için birikmiş mesajları göndermeyi sürdürüyor, anahtar
+ * silindiği için hiçbiri çözülemiyor ve her biri `onRelayMessage()` içinde
+ * patlıyor — "failed to process an inbound message" ve ardından
+ * "No matching key. history: …" bundan geliyor. Bu gürültü yeni oturumun
+ * yanıtlarıyla aynı hatta karıştığı için imza akışı da güvenilmez oluyor.
+ *
+ * Silinen tek şey cüzdan eşleşmeleri; kullanıcı yeniden onaylayınca geri gelir.
  */
-async function sessionIsAlive(provider: Provider): Promise<boolean> {
+const PURGE_FLAG = 'wc:needs-purge';
+
+/**
+ * Bayat oturum görüldüğünde depo **hemen** silinemez: Core canlıdır, kendi
+ * belleğindeki durumu geri yazar ve tutarsızlık büyür. Bu yüzden yalnızca
+ * işaretlenir; silme işi bir sonraki açılışta, hiçbir istemci kurulmadan önce
+ * yapılır.
+ */
+async function markStorageForPurge(): Promise<void> {
+  await AsyncStorage.setItem(PURGE_FLAG, '1').catch(() => undefined);
+}
+
+async function purgeWalletConnectStorageIfMarked(): Promise<void> {
+  const marked = await AsyncStorage.getItem(PURGE_FLAG).catch(() => null);
+  if (!marked) return;
+  await AsyncStorage.removeItem(PURGE_FLAG).catch(() => undefined);
+  await purgeWalletConnectStorage();
+}
+
+async function purgeWalletConnectStorage(): Promise<void> {
+  try {
+    const keys = await AsyncStorage.getAllKeys();
+    const ours = keys.filter((k) => k.startsWith('wc@2:') || k.startsWith('WALLETCONNECT'));
+    if (ours.length > 0) await AsyncStorage.multiRemove(ours);
+    debugLog('wallet:wc', 'WalletConnect deposu temizlendi', { silinen: ours.length });
+  } catch (err) {
+    debugError('wallet:wc', 'depo temizlenemedi', err);
+  }
+}
+
+/**
+ * Kayıtlı oturum kullanılabilir mi?
+ *
+ * **`ping` ile sorulmuyor.** Sorulması mantıklı görünüyordu ama Freighter
+ * `wc_sessionPing`'e yanıt vermiyor; sağlam oturumlar da zaman aşımına uğrayıp
+ * "ölü" sayılıyordu. Sonuç: her bağlanışta oturum silinip kullanıcıdan yeniden
+ * onay isteniyordu. Cevapsız ping, oturumun ölü olduğunu **kanıtlamıyor**.
+ *
+ * Bunun yerine yalnızca kesin bilinenlere bakılır: oturumun süresi ve
+ * sign-client'ın kendi kaydında durup durmadığı. Gerçekten ölü bir oturum
+ * imza adımında ortaya çıkar; orada yakalanıp silinir ve kullanıcıya tek
+ * cümlelik "bağlantın düştü, tekrar bağlan" denir.
+ */
+function sessionIsUsable(provider: Provider): boolean {
   const topic = provider.session?.topic;
   if (!topic) return false;
 
@@ -125,16 +195,18 @@ async function sessionIsAlive(provider: Provider): Promise<boolean> {
     return false;
   }
 
-  const client = (provider as unknown as { client?: { ping(args: { topic: string }): Promise<void> } }).client;
-  if (!client?.ping) return true; // soramıyorsak oturuma güven; hata imza adımında yakalanır
-
-  try {
-    await withTimeout(client.ping({ topic }), PING_TIMEOUT_MS);
-    return true;
-  } catch (err) {
-    debugError('wallet:wc', 'oturum ping yanıtı yok — bayat sayılıyor', err);
-    return false;
+  // Sağlayıcının belleğindeki oturum ile istemcinin deposu ayrışmış olabilir;
+  // öyleyse istek zaten "No matching key" ile düşerdi.
+  const client = (provider as unknown as { client?: { session?: { get(t: string): unknown } } }).client;
+  if (client?.session) {
+    try {
+      client.session.get(topic);
+    } catch {
+      debugLog('wallet:wc', 'oturum istemcinin deposunda yok', { topic });
+      return false;
+    }
   }
+  return true;
 }
 
 /**
@@ -170,8 +242,6 @@ async function bringWalletToFront(provider: Provider): Promise<void> {
 /** İstek yanıtsız kalırsa sonsuza kadar beklemeyelim. */
 const REQUEST_TIMEOUT_MS = 120_000;
 
-/** Oturumun hâlâ yaşadığını relay'e sorarken beklenecek süre. */
-const PING_TIMEOUT_MS = 8_000;
 
 /**
  * Relay, kendisinde karşılığı kalmamış bir oturum/eşleşme için bunu döndürür.
@@ -296,13 +366,16 @@ export const walletConnectWallet: WalletAdapter = {
       // Ölüyse burada düşürülür ve aşağıdaki taze eşleşmeye devam edilir.
       const existing = sessionAddress(provider);
       if (existing) {
-        if (await sessionIsAlive(provider)) {
+        if (sessionIsUsable(provider)) {
           debugLog('wallet:wc', 'MEVCUT oturum kullanıldı, yeni eşleşme yok', { address: existing });
           return { address: existing, walletId: 'walletconnect' };
         }
         debugLog('wallet:wc', 'kayıtlı oturum ölü — temizlenip yeniden eşleşilecek', {
           address: existing,
         });
+        // Temizlik **yerinde** yapılır; istemci yeniden kurulmaz. Canlı Core
+        // dururken ikincisini kurmak, aynı mesajın iki istemciye düşmesine ve
+        // imza yanıtının dinleyicisiz kalmasına yol açıyordu.
         await forgetSession(provider);
       } else {
         debugLog('wallet:wc', 'kayıtlı oturum yok, yeni eşleşme gerekiyor');
@@ -371,11 +444,50 @@ export const walletConnectWallet: WalletAdapter = {
       if (!provider.session) {
         throw new WalletError('Wallet is not connected.', 'NOT_CONNECTED');
       }
-      debugLog('wallet:wc', 'imza isteği gönderiliyor', { method: 'stellar_signXDR' });
-      const pending = provider.request<{ signedXDR: string }>(
-        { method: 'stellar_signXDR', params: { xdr } },
-        CHAIN,
-      );
+      const topic = provider.session.topic;
+      // Teşhis: isteğin cüzdana mı yoksa HTTP'ye mi yönleneceğini bu liste belirler.
+      debugLog('wallet:wc', 'imza isteği gönderiliyor', {
+        method: 'stellar_signXDR',
+        saglayiciYontemleri:
+          (provider as unknown as { rpcProviders?: Record<string, { namespace?: { methods?: string[] } }> })
+            .rpcProviders?.stellar?.namespace?.methods ?? null,
+        oturumYontemleri: provider.session.namespaces?.stellar?.methods ?? null,
+      });
+
+      /*
+        İstek **doğrudan sign-client'a** veriliyor, `provider.request` ile değil.
+
+        UniversalProvider'ın Stellar için kullandığı genel sağlayıcı şunu yapıyor:
+
+            namespace.methods.includes(method) ? client.request(...) : httpProvider.request(...)
+
+        Yöntem o listede yoksa istek cüzdana hiç gitmiyor; WalletConnect'in
+        HTTP RPC ağ geçidine gönderiliyor. Stellar'ın orada karşılığı olmadığı
+        için çağrı boş bir nesneyle ({}) reddediliyor — kullanıcıya "giriş
+        yapılamadı" diye dönen, ne kodu ne mesajı olan hata buydu. Ad alanı
+        yönlendirmesini atlayıp konuyu ve zinciri kendimiz vererek isteği
+        her koşulda cüzdana yolluyoruz.
+      */
+      const client = (provider as unknown as {
+        client?: {
+          request(args: {
+            topic: string;
+            chainId: string;
+            request: { method: string; params: unknown };
+          }): Promise<{ signedXDR: string }>;
+        };
+      }).client;
+
+      const pending = client
+        ? client.request({
+            topic,
+            chainId: CHAIN,
+            request: { method: 'stellar_signXDR', params: { xdr } },
+          })
+        : provider.request<{ signedXDR: string }>(
+            { method: 'stellar_signXDR', params: { xdr } },
+            CHAIN,
+          );
       // İstek yolda iken cüzdanı öne getir; kullanıcı onay ekranını görsün.
       void bringWalletToFront(provider);
       const result = await withTimeout(pending, REQUEST_TIMEOUT_MS);
@@ -385,6 +497,25 @@ export const walletConnectWallet: WalletAdapter = {
       }
       return result.signedXDR;
     } catch (err) {
+      // Relay/cüzdan tarafındaki hatalar düz nesne olarak geliyor ve çoğunun
+      // `message` alanı yok; ham hâli olmadan neyin patladığı anlaşılmıyor.
+      // `debugError` nesneyi `describeError`'dan geçirip yalnızca bilinen
+      // alanları alıyor; burada neyin fırlatıldığını bilmediğimiz için ham
+      // dökümü `debugLog` ile alıyoruz.
+      debugLog('wallet:wc', 'imza isteği hata verdi (HAM)', {
+        tip: typeof err,
+        sinif: (err as { constructor?: { name?: string } })?.constructor?.name ?? 'yok',
+        proto: Object.prototype.toString.call(err),
+        ownProps: err && typeof err === 'object' ? Object.getOwnPropertyNames(err) : 'yok',
+        json: (() => {
+          try {
+            return JSON.stringify(err, Object.getOwnPropertyNames(Object(err)));
+          } catch {
+            return 'serilestirilemedi';
+          }
+        })(),
+        str: String(err),
+      });
       const mapped = mapError(err);
       // Oturum relay tarafında yoksa kaydı burada da düşür: aksi hâlde kullanıcı
       // "Connect" deyip aynı ölü oturuma geri dönüyor.
