@@ -1,1 +1,1 @@
-export { ProfileScreen } from './ProfileScreen';
+export { PortfolioCard, ProfileScreen } from './ProfileScreen';

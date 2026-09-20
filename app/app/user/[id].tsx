@@ -3,6 +3,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { StyleSheet, View } from 'react-native';
 
 import { AsyncBoundary, Screen, TopBar } from '@/components/layout';
+import { PortfolioCard } from '@/components/profile';
 import { Avatar, Button, Card, KpiBox, Pill, RiskBadge, Text } from '@/components/ui';
 import { usersApi } from '@/lib/api';
 import type { UserOut } from '@/lib/api/types';
@@ -74,6 +75,7 @@ function Body({ user: u, onFullProfile }: { user: UserOut; onFullProfile: () => 
 
       {isTrader ? (
         <>
+          <PortfolioCard text={u.portfolio} />
           <View style={styles.grid}>
             <KpiBox
               label="Rating"

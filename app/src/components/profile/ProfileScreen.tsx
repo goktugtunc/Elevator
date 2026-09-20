@@ -3,6 +3,8 @@ import { useRouter } from 'expo-router';
 import {
   Bell,
   ChevronRight,
+  FileText,
+  Pencil,
   HelpCircle,
   LineChart,
   ShieldCheck,
@@ -67,7 +69,19 @@ export function ProfileScreen({ role }: { role: UserRole }) {
 
               {isTrader ? <TraderStatsCard user={user} /> : <CustomerTermsCard user={user} />}
 
+              {isTrader ? <PortfolioCard text={user.portfolio} own /> : null}
+
               <Card style={styles.menu}>
+                <MenuRow
+                  icon={<Pencil size={18} color={colors.navy900} />}
+                  title="Edit profile"
+                  subtitle={
+                    isTrader
+                      ? 'Name, bio, strategy and portfolio'
+                      : 'Name and bio'
+                  }
+                  onPress={() => router.push('/profile/edit')}
+                />
                 <MenuRow
                   icon={<WalletIcon size={18} color={colors.navy900} />}
                   title="Wallet"
@@ -157,6 +171,37 @@ function CustomerTermsCard({ user }: { user: MeOut }) {
   );
 }
 
+/**
+ * Trader'ın geçmişini kendi cümleleriyle anlattığı bölüm.
+ *
+ * İstatistikler zincirden geliyor; bu onların anlatısı. Kendi profilinde boşken
+ * de gösterilir ki doldurulacak bir yer olduğu belli olsun — başkasının
+ * profilinde boşsa hiç çizilmez.
+ */
+export function PortfolioCard({ text, own = false }: { text?: string | null; own?: boolean }) {
+  if (!text && !own) return null;
+  return (
+    <Card style={styles.portfolio}>
+      <View style={styles.portfolioHead}>
+        <FileText size={16} color={colors.text2} />
+        <Text variant="captionStrong" color="text2">
+          Portfolio
+        </Text>
+      </View>
+      {text ? (
+        <Text variant="body" color="text2">
+          {text}
+        </Text>
+      ) : (
+        <Text variant="caption" color="text3">
+          Tell investors what you have traded and how it went. They see your numbers anyway — this is
+          the story behind them.
+        </Text>
+      )}
+    </Card>
+  );
+}
+
 function MenuRow({
   icon,
   title,
@@ -186,6 +231,8 @@ const styles = StyleSheet.create({
   pills: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
   kpis: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   kpi: { flexGrow: 1, flexBasis: '46%', minWidth: 0 },
+  portfolio: { gap: spacing.sm },
+  portfolioHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   menu: { paddingVertical: 0 },
   icon: {
     width: 36,

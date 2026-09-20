@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { Linking, StyleSheet, View } from 'react-native';
 
 import { AsyncBoundary, EmptyState, Screen, TopBar } from '@/components/layout';
+import { PortfolioCard } from '@/components/profile';
 import {
   Avatar,
   Button,
@@ -117,6 +118,8 @@ export default function TraderProfile() {
                   <Text variant="body">{p.user.strategy_summary}</Text>
                 </Card>
               ) : null}
+
+              <PortfolioCard text={p.user.portfolio} />
 
               <Section title="Live trades">
                 {p.recent_trades.length ? (

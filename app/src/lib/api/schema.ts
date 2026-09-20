@@ -746,6 +746,7 @@ export interface MeOut {
   budget_amount?: string | null;
   risk_profile?: RiskProfile | null;
   strategy_summary?: string | null;
+  portfolio?: string | null;
   commission_bps?: number | null;
   min_capital?: string | null;
   risk_level?: RiskLevel | null;
@@ -1320,6 +1321,7 @@ export interface UserOut {
   budget_amount?: string | null;
   risk_profile?: RiskProfile | null;
   strategy_summary?: string | null;
+  portfolio?: string | null;
   commission_bps?: number | null;
   min_capital?: string | null;
   risk_level?: RiskLevel | null;
@@ -1338,6 +1340,7 @@ export interface UserUpdateIn {
   budget_amount?: number | string | null;
   risk_profile?: RiskProfile | null;
   strategy_summary?: string | null;
+  portfolio?: string | null;
   commission_bps?: number | null;
   min_capital?: number | string | null;
   risk_level?: RiskLevel | null;
