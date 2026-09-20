@@ -5,6 +5,7 @@
  */
 const trNumber = new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 });
 const trNumber0 = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
+const exactNumber = new Intl.NumberFormat('en-US', { maximumFractionDigits: 7 });
 
 export function formatTRY(amount: number, opts: { decimals?: boolean } = {}): string {
   const n = opts.decimals ? trNumber.format(amount) : trNumber0.format(amount);
@@ -80,6 +81,22 @@ export function formatAmount(value: string | null | undefined, code = ''): strin
   const n = Number(value);
   if (!Number.isFinite(n)) return value;
   return code ? `${trNumber0.format(n)} ${code}` : trNumber0.format(n);
+}
+
+/**
+ * Tutarı **yuvarlamadan** gösterir (7 basamağa kadar, sondaki sıfırlar atılır).
+ *
+ * `formatAmount` başlık rakamları için tam sayıya yuvarlıyor; bu, kapanış
+ * özeti gibi ödenen tutarın kendisinin önemli olduğu yerlerde yanıltıcı:
+ * 99,8801955 XLM'lik bir ödeme "100 XLM" görünüyor ve kullanıcı anaparasını
+ * tam aldığını sanıyor. Para hareketinin tam tutarı gösterilecekse bu kullanılır.
+ */
+export function formatAmountExact(value: string | null | undefined, code = ''): string {
+  if (!value) return '—';
+  const n = Number(value);
+  if (!Number.isFinite(n)) return value;
+  const text = exactNumber.format(n);
+  return code ? `${text} ${code}` : text;
 }
 
 /** "30" gün → "1 mo" gibi kısa süre etiketi. */

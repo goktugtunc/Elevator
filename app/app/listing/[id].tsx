@@ -8,7 +8,13 @@ import { Button, Card, ErrorNotice, ListRow, Pill, RiskBadge, Segmented, Text } 
 import { listingsApi, offersApi } from '@/lib/api';
 import type { ListingDetailOut, OfferOut, OfferStatus } from '@/lib/api/types';
 import { userMessage } from '@/lib/errors';
-import { formatAmount, formatBps, formatDuration, formatRelative } from '@/lib/format';
+import {
+  formatAmount,
+  formatAmountExact,
+  formatBps,
+  formatDuration,
+  formatRelative,
+} from '@/lib/format';
 import { phaseLabel, useOnchainAction } from '@/lib/onchain';
 import { isPast, useNow } from '@/lib/useNow';
 import { useSession } from '@/store/session';
@@ -241,7 +247,7 @@ function EscrowCard({
         </Text>
       ) : (
         <>
-          <Text variant="numeric">{formatAmount(locked, code)}</Text>
+          <Text variant="numeric">{formatAmountExact(locked, code)}</Text>
           <Text variant="caption" color="text3">
             Locked for this listing. A trader you hire trades it inside the escrow and can never
             withdraw it; whatever is not committed to an agreement is yours to take back.
@@ -284,7 +290,7 @@ function Details({ listing }: { listing: ListingDetailOut }) {
           {
             label: 'In escrow',
             value: listing.reserved_amount
-              ? formatAmount(listing.reserved_amount, assetCode)
+              ? formatAmountExact(listing.reserved_amount, assetCode)
               : 'Nothing locked',
           },
         ]

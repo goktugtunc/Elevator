@@ -27,6 +27,7 @@ import type { AgreementOut, AgreementStatus, AssetOut, TradeOut } from '@/lib/ap
 import {
   assetLabel,
   formatAmount,
+  formatAmountExact,
   formatBps,
   formatBpsSigned,
   formatRelative,
@@ -335,10 +336,11 @@ function Terms({ agreement: a }: { agreement: AgreementOut }) {
   if (a.settled_at) {
     rows.push(
       { label: 'Settled', value: formatRelative(a.settled_at) },
-      { label: 'Final value', value: formatAmount(a.final_value, code) },
-      { label: 'Trader fee', value: formatAmount(a.trader_fee, code) },
-      { label: 'Platform fee', value: formatAmount(a.platform_fee, code) },
-      { label: 'Customer payout', value: formatAmount(a.customer_payout, code) },
+      // Kapanış özeti: gerçekten ödenen tutarlar, yuvarlanmadan.
+      { label: 'Final value', value: formatAmountExact(a.final_value, code) },
+      { label: 'Trader fee', value: formatAmountExact(a.trader_fee, code) },
+      { label: 'Platform fee', value: formatAmountExact(a.platform_fee, code) },
+      { label: 'Customer payout', value: formatAmountExact(a.customer_payout, code) },
     );
   }
   return (
@@ -571,7 +573,7 @@ function TradeSheet({
             ))}
           </View>
           <Text variant="caption" color="text3">
-            In escrow: {formatAmount(inBalance, inAsset.code)}
+            In escrow: {formatAmountExact(inBalance, inAsset.code)}
           </Text>
         </View>
 
@@ -600,7 +602,7 @@ function TradeSheet({
           suffix={inAsset.code}
           error={
             value !== null && value > Number(inBalance)
-              ? `The escrow holds ${formatAmount(inBalance, inAsset.code)}.`
+              ? `The escrow holds ${formatAmountExact(inBalance, inAsset.code)}.`
               : undefined
           }
         />
@@ -615,8 +617,8 @@ function TradeSheet({
 
         {q ? (
           <Card style={styles.quoteCard}>
-            <Row label="You get" value={`${formatAmount(q.amount_out, q.token_out.code)}`} />
-            <Row label="At worst" value={`${formatAmount(q.min_out, q.token_out.code)}`} />
+            <Row label="You get" value={formatAmountExact(q.amount_out, q.token_out.code)} />
+            <Row label="At worst" value={formatAmountExact(q.min_out, q.token_out.code)} />
             <Row label="Price" value={`1 ${q.token_in.code} = ${q.price} ${q.token_out.code}`} />
             {q.price_impact_pct ? <Row label="Price impact" value={`${q.price_impact_pct}%`} /> : null}
             <Row
@@ -852,8 +854,10 @@ const styles = StyleSheet.create({
   figure: { gap: 2 },
   pending: { gap: spacing.sm, backgroundColor: colors.amberBg },
   actions: { gap: spacing.md },
-  rating: { gap: spacing.md, alignItems: 'flex-start' },
-  stars: { flexDirection: 'row', gap: spacing.sm },
+  // `alignItems: flex-start` vermiyoruz: yorum alanı ve düğme kartın genişliğini
+  // almalı; aksi hâlde alanlar içeriklerine göre daralıp tek sütuna sıkışıyor.
+  rating: { gap: spacing.md },
+  stars: { flexDirection: 'row', gap: spacing.sm, alignSelf: 'flex-start' },
   tradeSheet: { gap: spacing.md, width: '100%' },
   tradeGroup: { gap: spacing.sm },
   tradeChips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
