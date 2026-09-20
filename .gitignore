@@ -32,3 +32,6 @@ WhatsApp Image *
 
 # Derlenmiş APK (GitHub tek dosyada 100 MiB sınırı koyuyor; sürüm eki olarak yüklenir)
 *.apk
+
+# Ekran kayıtları (depoya kazara girmesin)
+*.mp4
