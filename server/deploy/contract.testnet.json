@@ -1,0 +1,78 @@
+{
+  "network": "testnet",
+  "contract_id": "CCGAGVFFTH2IIH6WW2E52VVR5TJJFP3OL7HDZUZ2WQ7MT4Z57GA7NAG2",
+  "router": "CCJUD55AG6W5HAI5LRVNKAE5WDP5XGZBUDS5WNTIVDU7O264UZZE7BRD",
+  "admin": "GCQHL377VFSG4MLLBEWX33CC3S7T5QAGWOD64A5BH4OOWWD3XWYDKHZH",
+  "wasm_sha256": "ec5da54f94abc9937cc645d882e5f7cea14830a9bbae787e632b8ed1cf8b9d48",
+  "deployed_at": "2026-09-19T19:17:15.945938+00:00",
+  "network_passphrase": "Test SDF Network ; September 2015",
+  "fee_recipient": "GCQHL377VFSG4MLLBEWX33CC3S7T5QAGWOD64A5BH4OOWWD3XWYDKHZH",
+  "platform_fee_bps": 0,
+  "settle_slippage_bps": 100,
+  "wasm": "contracts/target/wasm32v1-none/release/elevator_vault.wasm",
+  "wasm_bytes": 39097,
+  "deploy_script": "scripts/deploy_contract.sh testnet",
+  "transactions": {
+    "upload_wasm": "7360f9d3206e919df2b3a923ec6b5dba5d3c39f541c13c5afec56e397f626fdc",
+    "create_contract": "857d882ec95b0126aa79f8ccd8d01f6ed974d64bf31150e6846294df28a940ab",
+    "set_token": [
+      {
+        "token": "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC",
+        "code": "XLM",
+        "allowed": true,
+        "is_base": true,
+        "tx": "b5b8b3764cde59a1483391fc41e407953b262c34d6f77e0fc9b778d8f0650bb2"
+      },
+      {
+        "token": "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+        "code": "USDC (Circle testnet)",
+        "allowed": true,
+        "is_base": true,
+        "tx": "e640328b3bb0cd765c6e7857de3a30f0d607d234cb9cb7a7013ad305d9dcafac"
+      },
+      {
+        "token": "CB3TLW74NBIOT3BUWOZ3TUM6RFDF6A4GVIRUQRQZABG5KPOUL4JJOV2F",
+        "code": "USDC (Soroswap test)",
+        "allowed": true,
+        "is_base": true,
+        "tx": "9984cf543e2b351d8ce58574d3602aa811d3b9bdc6df22af68156a4a118766c5"
+      },
+      {
+        "token": "CBQDUWBOHS7P4TZIJ3KUPUZQOWMKJC6CQPPFEONSV3BH4X27YVEXWNOT",
+        "code": "EURC (Soroswap test)",
+        "allowed": true,
+        "is_base": false,
+        "tx": "f86af43a3a6437eba6c75ea7d0e84353a90271bab5be36507dc7aaddd96bd4f9"
+      }
+    ]
+  },
+  "explorer": {
+    "contract": "https://stellar.expert/explorer/testnet/contract/CCGAGVFFTH2IIH6WW2E52VVR5TJJFP3OL7HDZUZ2WQ7MT4Z57GA7NAG2",
+    "create_tx": "https://stellar.expert/explorer/testnet/tx/857d882ec95b0126aa79f8ccd8d01f6ed974d64bf31150e6846294df28a940ab"
+  },
+  "previous_deployments": [
+    {
+      "contract_id": "CBQYSVTEIDHQQT5P5AKWMTIF23BEUZRWWKYX4URO23T7LX64R3AWC5SW",
+      "wasm_sha256": "5513f62ede298f7315b893975c2bfcd7bff189b67b17f41ba131d536b983f182",
+      "note": "pre-review build, superseded 2026-09-19T19:17Z"
+    }
+  ],
+  "upgrades": [
+    {
+      "wasm_sha256": "b7fdc81accd2e32c80140831b1c09ce180c78e4889d671aacd6da59de766fb87",
+      "previous_wasm_sha256": "800b4473dd187e475e1d53e2bd2f82365c21670c54a5901abfb25e87cdf7f991",
+      "binver": "1.2.0",
+      "at": "2026-09-20T02:15:37.694533+00:00",
+      "note": "reserve/release/open_reserved/fund_reserved: capital is locked in the vault at listing time",
+      "upload_tx": "039efc7ac53907990312d0eb9aa6db44386a2eccad14a14b848cffa2da497b22",
+      "upgrade_tx": "897402619031058c103e887ca53ed51fa9e0e9a4eac089475dd1c8a3b3d9f54d"
+    },
+    {
+      "wasm_sha256": "ec5da54f94abc9937cc645d882e5f7cea14830a9bbae787e632b8ed1cf8b9d48",
+      "previous_wasm_sha256": "b7fdc81accd2e32c80140831b1c09ce180c78e4889d671aacd6da59de766fb87",
+      "binver": "1.2.0",
+      "at": "2026-09-20T08:21:35.792194+00:00",
+      "note": "renamed to Elevator (crate elevator_vault, ElevatorVault); no behaviour change"
+    }
+  ]
+}

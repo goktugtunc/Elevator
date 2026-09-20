@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.env
+backups/*.sql.gz
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+contracts/target/
+_parked/
+backups/
+*.pdf
+.env
+.env.*
+!.env.example

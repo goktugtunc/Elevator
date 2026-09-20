@@ -1,0 +1,67 @@
+name: mobilapp
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: mobilapp-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: mobilapp
+      POSTGRES_USER: mobilapp
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - mobilapp_pgdata:/var/lib/postgresql/data
+      - ./docker/initdb:/docker-entrypoint-initdb.d:ro
+    networks: [mobilapp_net]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mobilapp -d mobilapp"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    # No host port: only reachable from the compose network.
+
+  api:
+    build:
+      context: .
+      args:
+        INSTALL_DEV: "${INSTALL_DEV:-0}"
+    image: mobilapp-api:latest
+    container_name: mobilapp-api
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://mobilapp:${POSTGRES_PASSWORD}@db:5432/mobilapp
+      UVICORN_WORKERS: "2"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [mobilapp_net]
+    ports:
+      - "127.0.0.1:8012:8000"   # localhost only; nginx (mobilback.yolalapp.com) fronts it
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+
+  # Background worker (DESIGN §2.5): same image, `python -m app.worker.main` — indexer, reconciler,
+  # anchor_sync, expiry, push, fx. Exactly one replica.
+  worker:
+    image: mobilapp-api:latest
+    container_name: mobilapp-worker
+    restart: unless-stopped
+    command: ["worker"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://mobilapp:${POSTGRES_PASSWORD}@db:5432/mobilapp
+    depends_on:
+      api:
+        condition: service_healthy
+    networks: [mobilapp_net]
+
+networks:
+  mobilapp_net:
+
+volumes:
+  mobilapp_pgdata:

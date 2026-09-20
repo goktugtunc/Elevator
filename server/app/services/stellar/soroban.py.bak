@@ -1,0 +1,835 @@
+"""Soroban RPC gateway (DESIGN §2.2): contract reads via simulation, unsigned-XDR builders with
+``source = the user`` (so one signature authorises the Soroban auth entries, §2.4), send/poll,
+``getEvents`` for the indexer, Soroswap router quotes and the classic payment/trustline builders.
+
+Everything really talks to the configured RPC (``settings.effective_rpc_url``); nothing here is mocked.
+Only ``app.services.stellar.*`` imports ``stellar_sdk``.
+"""
+from __future__ import annotations
+
+import asyncio
+import logging
+import time
+from datetime import UTC, datetime, timedelta
+from decimal import Decimal
+from typing import Any
+
+import httpx
+from stellar_sdk import (
+    Account,
+    Address,
+    AiohttpClient,
+    SorobanServerAsync,
+    TransactionBuilder,
+    TransactionEnvelope,
+    scval,
+)
+from stellar_sdk import xdr as sx
+from stellar_sdk.contract import AssembledTransactionAsync
+from stellar_sdk.contract.exceptions import AssembledTransactionError, SimulationFailedError
+from stellar_sdk.exceptions import AccountNotFoundException, SdkError
+from stellar_sdk.soroban_rpc import (
+    EventFilter,
+    EventInfo,
+    GetTransactionResponse,
+    GetTransactionStatus,
+    SendTransactionStatus,
+)
+from stellar_sdk.strkey import StrKey
+
+from app.core.config import Settings
+from app.core.errors import AppError, StellarError, ValidationError
+from app.services.stellar import contract_abi as abi
+from app.services.stellar.contract_abi import (
+    Agreement,
+    Config,
+    Fn,
+    RouterFn,
+    Terms,
+    TokenInfo,
+    VaultContractError,
+)
+from app.services.stellar.types import (
+    AccountNotFoundError,
+    AssetRef,
+    EventRecord,
+    RouterQuote,
+    SimulationResult,
+    TxRejectedError,
+    TxResult,
+    UnsignedTx,
+)
+from app.services.stellar.xdr_utils import (
+    amount_str,
+    apply_memo,
+    envelope_from_xdr,
+    result_codes_from_xdr,
+    to_sdk_asset,
+)
+
+log = logging.getLogger(__name__)
+
+#: Source used for read-only simulations (never submitted); RPC does not require it to exist.
+NULL_ACCOUNT = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"
+READ_TIMEOUT_SECONDS = 60
+POLL_INTERVAL_SECONDS = 1.0
+RPC_REQUEST_TIMEOUT = 20
+RPC_POST_TIMEOUT = 45
+MAX_EVENT_PAGE = 10_000
+
+AgreementView = Agreement
+
+
+# --- helpers ---------------------------------------------------------------------------------
+
+
+def _plain(value: Any) -> Any:
+    """``scval.to_native`` output -> JSON-friendly python (Address -> str, bytes -> hex)."""
+    if isinstance(value, Address):
+        return value.address
+    if isinstance(value, bytes):
+        return value.hex()
+    if isinstance(value, list):
+        return [_plain(v) for v in value]
+    if isinstance(value, tuple):
+        return [_plain(v) for v in value]
+    if isinstance(value, dict):
+        return {str(_plain(k)): _plain(v) for k, v in value.items()}
+    if isinstance(value, sx.SCVal):
+        return value.to_xdr()
+    return value
+
+
+def native_of(v: sx.SCVal | None) -> Any:
+    if v is None:
+        return None
+    try:
+        return _plain(scval.to_native(v))
+    except Exception:  # noqa: BLE001 - keep the raw XDR when the SDK cannot map it
+        return v.to_xdr()
+
+
+def _contract_strkey(cid: Any) -> str:
+    """``ContractEvent.contract_id`` -> C... strkey. Protocol 23+ XDR wraps the hash in ``ContractID``
+    (``.contract_id.hash``); older meta carried a bare ``Hash`` (``.hash``)."""
+    if cid is None:
+        return ""
+    inner = getattr(cid, "contract_id", None)
+    raw = getattr(inner, "hash", None) if inner is not None else getattr(cid, "hash", None)
+    if isinstance(raw, bytes | bytearray) and len(raw) == 32:
+        return StrKey.encode_contract(bytes(raw))
+    return ""
+
+
+def _event_index_from_id(event_id: str) -> int:
+    """RPC event ids are ``<toid>-<index within the transaction>``."""
+    _, _, tail = (event_id or "").rpartition("-")
+    try:
+        return int(tail)
+    except ValueError:
+        return 0
+
+
+def tx_result_code(result_xdr: str | None) -> str | None:
+    if not result_xdr:
+        return None
+    try:
+        codes = result_codes_from_xdr(result_xdr)
+    except StellarError:
+        return None
+    ops = codes.get("operations")
+    tx = str(codes.get("transaction"))
+    if isinstance(ops, list) and ops:
+        return f"{tx}/{ops[0]}"
+    return tx
+
+
+def contract_error_from_diagnostics(diagnostics_xdr: list[str] | None) -> int | None:
+    """Vault ``#[contracterror]`` code from diagnostic events (``error`` topic + SCV_ERROR), if any."""
+    for raw in diagnostics_xdr or []:
+        try:
+            ev = sx.DiagnosticEvent.from_xdr(raw)
+        except Exception:  # noqa: BLE001
+            continue
+        body = ev.event.body.v0
+        if body is None:
+            continue
+        for t in body.topics:
+            code = abi.contract_error_from_scval(t)
+            if code is not None:
+                return code
+        code = abi.contract_error_from_scval(body.data)
+        if code is not None:
+            return code
+    return None
+
+
+def _expiry(envelope: TransactionEnvelope, fallback_seconds: int) -> datetime:
+    pre = envelope.transaction.preconditions
+    tb = getattr(pre, "time_bounds", None) if pre is not None else None
+    if tb is not None and tb.max_time:
+        return datetime.fromtimestamp(int(tb.max_time), tz=UTC)
+    return datetime.now(UTC) + timedelta(seconds=fallback_seconds)
+
+
+class SorobanGateway:
+    """Stateless (apart from the loop-bound RPC client); safe to share across requests."""
+
+    def __init__(self, settings: Settings) -> None:
+        self._settings = settings
+        self.network_passphrase = settings.network_passphrase
+        self.rpc_url = settings.effective_rpc_url
+        self.vault_contract_id = settings.vault_contract_id
+        self.router_id = settings.effective_soroswap_router_id
+        self._server: SorobanServerAsync | None = None
+        self._server_loop: asyncio.AbstractEventLoop | None = None
+
+    # --- infrastructure ---------------------------------------------------------------------
+
+    @property
+    def server(self) -> SorobanServerAsync:
+        if not self.rpc_url:
+            raise StellarError("SOROBAN_RPC_URL is not configured for this network", code="rpc_not_configured")
+        loop = asyncio.get_running_loop()
+        if self._server is None or self._server_loop is not loop:
+            self._server = SorobanServerAsync(
+                self.rpc_url, client=AiohttpClient(request_timeout=RPC_REQUEST_TIMEOUT, post_timeout=RPC_POST_TIMEOUT)
+            )
+            self._server_loop = loop
+        return self._server
+
+    async def close(self) -> None:
+        if self._server is not None:
+            try:
+                await self._server.close()
+            except Exception:  # pragma: no cover - best effort
+                log.debug("error closing RPC client", exc_info=True)
+        self._server = None
+        self._server_loop = None
+
+    @property
+    def vault(self) -> str:
+        if not self.vault_contract_id:
+            raise StellarError("VAULT_CONTRACT_ID is not configured", code="vault_not_configured")
+        return self.vault_contract_id
+
+    @staticmethod
+    def _wrap(e: Exception, context: str) -> AppError:
+        if isinstance(e, AppError):
+            return e
+        if isinstance(e, AccountNotFoundException):
+            return AccountNotFoundError(f"{context}: account not found on the ledger (not funded?)")
+        if isinstance(e, TimeoutError | asyncio.TimeoutError):
+            return StellarError(f"{context}: RPC timeout", code="rpc_timeout")
+        if isinstance(e, SdkError | ValueError):
+            return StellarError(f"{context}: {type(e).__name__}: {e}", code="rpc_error")
+        return StellarError(f"{context}: {type(e).__name__}: {e}", code="rpc_error")
+
+    def _raise_simulation_error(self, error: str | None, context: str, *, contract_id: str | None = None) -> None:
+        """Map a simulation error: vault ``#[contracterror]`` codes become ``VaultContractError``; errors from
+        other contracts (SAC, router) or the host stay ``StellarError`` with the code in ``details``."""
+        code = abi.parse_contract_error(error)
+        is_vault = contract_id is None or contract_id == self.vault_contract_id
+        if code is not None and is_vault:
+            raise VaultContractError(code, context=context, details={"simulation_error": (error or "")[:1000]})
+        text = error or "unknown"
+        kind = "auth_error" if "Error(Auth" in text else "simulation_failed"
+        details: dict[str, Any] = {"simulation_error": text[:2000]}
+        if code is not None:
+            details["contract_error_code"] = code
+            details["contract_id"] = contract_id
+        raise StellarError(f"{context}: simulation failed: {text[:300]}", code=kind, details=details)
+
+    # --- raw RPC ----------------------------------------------------------------------------
+
+    async def latest_ledger(self) -> int:
+        try:
+            return int((await self.server.get_latest_ledger()).sequence)
+        except Exception as e:
+            raise self._wrap(e, "latest_ledger") from e
+
+    async def load_sequence(self, account_id: str) -> int:
+        try:
+            return int((await self.server.load_account(account_id)).sequence)
+        except Exception as e:
+            raise self._wrap(e, "load_account") from e
+
+    async def account_exists(self, account_id: str) -> bool:
+        try:
+            await self.server.load_account(account_id)
+            return True
+        except AccountNotFoundException:
+            return False
+        except Exception as e:
+            raise self._wrap(e, "account_exists") from e
+
+    async def simulate(self, tx: str | TransactionEnvelope) -> SimulationResult:
+        """``simulateTransaction`` of an envelope (XDR or object). Never raises for a *contract* failure:
+        the error text and decoded contract error code are in the result."""
+        envelope = envelope_from_xdr(tx, self.network_passphrase) if isinstance(tx, str) else tx
+        try:
+            resp = await self.server.simulate_transaction(envelope)
+        except Exception as e:
+            raise self._wrap(e, "simulate") from e
+        result_xdr = resp.results[0].xdr if resp.results else None
+        native = native_of(sx.SCVal.from_xdr(result_xdr)) if result_xdr else None
+        return SimulationResult(
+            error=resp.error,
+            latest_ledger=int(resp.latest_ledger),
+            min_resource_fee=int(resp.min_resource_fee) if resp.min_resource_fee is not None else None,
+            result_xdr=result_xdr,
+            result=native,
+            transaction_data_xdr=resp.transaction_data,
+            restore_needed=resp.restore_preamble is not None,
+            contract_error_code=abi.parse_contract_error(resp.error),
+        )
+
+    async def send(self, signed_xdr: str) -> str:
+        """``sendTransaction``; returns the hash once the network accepted it (PENDING / DUPLICATE)."""
+        envelope = envelope_from_xdr(signed_xdr, self.network_passphrase)
+        try:
+            resp = await self.server.send_transaction(envelope)
+        except Exception as e:
+            raise self._wrap(e, "send") from e
+        tx_hash = resp.hash or envelope.hash_hex()
+        if resp.status in (SendTransactionStatus.PENDING, SendTransactionStatus.DUPLICATE):
+            log.info("send: %s accepted (%s)", tx_hash, resp.status.value)
+            return tx_hash
+        if resp.status == SendTransactionStatus.TRY_AGAIN_LATER:
+            raise StellarError("network is busy, try again", code="try_again_later", details={"hash": tx_hash})
+        code = tx_result_code(resp.error_result_xdr)
+        cerr = contract_error_from_diagnostics(resp.diagnostic_events_xdr)
+        details: dict[str, Any] = {"hash": tx_hash, "tx_code": code}
+        if cerr is not None:
+            raise VaultContractError(cerr, context="send", details=details)
+        raise TxRejectedError(f"transaction rejected by the network: {code or 'unknown'}", details=details)
+
+    async def get_transaction(self, tx_hash: str) -> TxResult:
+        try:
+            resp = await self.server.get_transaction(tx_hash)
+        except Exception as e:
+            raise self._wrap(e, "get_transaction") from e
+        return self._tx_result(tx_hash, resp)
+
+    async def poll_tx(self, tx_hash: str, timeout: float | None = None) -> TxResult:  # noqa: ASYNC109 - API name from DESIGN
+        """Poll ``getTransaction`` until it is SUCCESS/FAILED or ``timeout`` seconds elapsed (then NOT_FOUND)."""
+        limit = float(timeout if timeout is not None else self._settings.tx_submit_timeout_seconds)
+        deadline = time.monotonic() + limit
+        while True:
+            res = await self.get_transaction(tx_hash)
+            if not res.pending or time.monotonic() >= deadline:
+                return res
+            await asyncio.sleep(POLL_INTERVAL_SECONDS)
+
+    def _tx_result(self, tx_hash: str, resp: GetTransactionResponse) -> TxResult:
+        status = resp.status.value if isinstance(resp.status, GetTransactionStatus) else str(resp.status)
+        created = datetime.fromtimestamp(int(resp.create_at), tz=UTC) if resp.create_at else None
+        if resp.status == GetTransactionStatus.NOT_FOUND:
+            return TxResult(hash=tx_hash, status=status)
+        return_value_xdr: str | None = None
+        native: Any = None
+        events: list[EventRecord] = []
+        if resp.result_meta_xdr:
+            rv, events = self._parse_meta(tx_hash, resp.result_meta_xdr, int(resp.ledger or 0))
+            if rv is not None:
+                return_value_xdr = rv.to_xdr()
+                native = native_of(rv)
+        error: str | None = None
+        cerr: int | None = None
+        if resp.status == GetTransactionStatus.FAILED:
+            error = tx_result_code(resp.result_xdr) or "txFAILED"
+            cerr = contract_error_from_diagnostics(resp.diagnostic_events_xdr)
+        return TxResult(
+            hash=tx_hash,
+            status=status,
+            ledger=int(resp.ledger) if resp.ledger is not None else None,
+            created_at=created,
+            envelope_xdr=resp.envelope_xdr,
+            result_xdr=resp.result_xdr,
+            result_meta_xdr=resp.result_meta_xdr,
+            return_value_xdr=return_value_xdr,
+            return_value=native,
+            error=error,
+            contract_error_code=cerr,
+            events=events,
+        )
+
+    def _parse_meta(self, tx_hash: str, meta_xdr: str, ledger: int) -> tuple[sx.SCVal | None, list[EventRecord]]:
+        """Return value + contract events out of ``resultMetaXdr`` (protocol 23+ V4, legacy V3)."""
+        try:
+            meta = sx.TransactionMeta.from_xdr(meta_xdr)
+        except Exception:  # noqa: BLE001
+            log.warning("cannot decode result meta for %s", tx_hash, exc_info=True)
+            return None, []
+        contract_events: list[sx.ContractEvent] = []
+        return_value: sx.SCVal | None = None
+        if meta.v == 4 and meta.v4 is not None:
+            for op in meta.v4.operations or []:
+                contract_events.extend(op.events or [])
+            if meta.v4.soroban_meta is not None:
+                return_value = meta.v4.soroban_meta.return_value
+        elif meta.v == 3 and meta.v3 is not None and meta.v3.soroban_meta is not None:
+            contract_events.extend(meta.v3.soroban_meta.events or [])
+            return_value = meta.v3.soroban_meta.return_value
+        records: list[EventRecord] = []
+        idx = 0
+        for ev in contract_events:
+            if ev.type != sx.ContractEventType.CONTRACT or ev.body.v0 is None:
+                continue
+            cid = _contract_strkey(ev.contract_id)
+            topics = list(ev.body.v0.topics)
+            data = ev.body.v0.data
+            records.append(
+                EventRecord(
+                    id=f"{tx_hash}-{idx:010d}",
+                    ledger=ledger,
+                    contract_id=cid,
+                    tx_hash=tx_hash,
+                    topics_xdr=[t.to_xdr() for t in topics],
+                    value_xdr=data.to_xdr(),
+                    event_index=idx,
+                    decoded=self._try_decode(cid, topics, data),
+                )
+            )
+            idx += 1
+        return return_value, records
+
+    def _try_decode(self, contract_id: str, topics: list[Any], data: Any) -> Any:
+        if self.vault_contract_id and contract_id != self.vault_contract_id:
+            return None
+        try:
+            return abi.decode_event(topics, data)
+        except StellarError:
+            log.debug("undecodable vault event on %s", contract_id, exc_info=True)
+            return None
+
+    def _record_from_info(self, e: EventInfo) -> EventRecord:
+        return EventRecord(
+            id=e.id,
+            ledger=int(e.ledger),
+            contract_id=e.contract_id,
+            tx_hash=e.transaction_hash,
+            topics_xdr=list(e.topic),
+            value_xdr=e.value,
+            ledger_close_at=e.ledger_close_at,
+            event_index=_event_index_from_id(e.id),
+            operation_index=int(e.operation_index or 0),
+            transaction_index=int(e.transaction_index or 0),
+            in_successful_contract_call=bool(e.in_successful_contract_call),
+            event_type=str(e.event_type),
+            decoded=self._try_decode(e.contract_id, list(e.topic), e.value),
+        )
+
+    async def get_events(
+        self,
+        start_ledger: int | None = None,
+        cursor: str | None = None,
+        contract_id: str | None = None,
+        limit: int = 100,
+        topics: list[list[str]] | None = None,
+    ) -> tuple[list[EventRecord], str | None, int]:
+        """``getEvents`` for one contract (default: the vault). Pass either ``cursor`` (preferred, from the
+        previous call) or ``start_ledger``. Returns ``(events, next_cursor, latest_ledger)``."""
+        cid = contract_id or self.vault
+        filters = [EventFilter(event_type="contract", contract_ids=[cid], topics=topics or None)]
+        if not cursor and start_ledger is None:
+            start_ledger = max(1, await self.latest_ledger() - 1)
+        try:
+            resp = await self.server.get_events(
+                start_ledger=None if cursor else int(start_ledger or 1),
+                filters=filters,
+                cursor=cursor or None,
+                limit=max(1, min(int(limit), MAX_EVENT_PAGE)),
+            )
+        except Exception as e:
+            raise self._wrap(e, "get_events") from e
+        events = [self._record_from_info(e) for e in resp.events]
+        next_cursor = resp.cursor or (events[-1].id if events else cursor)
+        return events, next_cursor, int(resp.latest_ledger)
+
+    # --- contract reads (simulation) --------------------------------------------------------
+
+    async def read(self, contract_id: str, fn: str, params: list[sx.SCVal] | None = None, *, source: str = NULL_ACCOUNT) -> sx.SCVal:
+        """Simulate ``contract_id.fn(params)`` and return the raw result SCVal (read-only, never submitted)."""
+        tx = (
+            TransactionBuilder(Account(source, 0), self.network_passphrase, base_fee=self._settings.base_fee_stroops)
+            .append_invoke_contract_function_op(contract_id, fn, params or [])
+            .set_timeout(READ_TIMEOUT_SECONDS)
+            .build()
+        )
+        sim = await self.simulate(tx)
+        if sim.error is not None:
+            self._raise_simulation_error(sim.error, fn, contract_id=contract_id)
+        if sim.result_xdr is None:
+            raise StellarError(f"{fn}: simulation returned no result", code="simulation_failed")
+        return sx.SCVal.from_xdr(sim.result_xdr)
+
+    async def get_agreement(self, agreement_id: int) -> Agreement:
+        return Agreement.from_scval(await self.read(self.vault, Fn.GET_AGREEMENT, abi.args_id(agreement_id)))
+
+    async def get_balances(self, agreement_id: int) -> list[tuple[str, int]]:
+        return abi.decode_balances(await self.read(self.vault, Fn.GET_BALANCES, abi.args_id(agreement_id)))
+
+    async def value_in_base(self, agreement_id: int) -> int:
+        return abi.decode_i128(await self.read(self.vault, Fn.VALUE_IN_BASE, abi.args_id(agreement_id)))
+
+    async def get_config(self) -> Config:
+        return Config.from_scval(await self.read(self.vault, Fn.GET_CONFIG, []))
+
+    async def is_token_allowed(self, token: str) -> TokenInfo:
+        return TokenInfo.from_scval(await self.read(self.vault, Fn.IS_TOKEN_ALLOWED, [abi.enc_address(token)]))
+
+    async def next_id(self) -> int:
+        return abi.decode_u64(await self.read(self.vault, Fn.NEXT_ID, []))
+
+    async def token_balance(self, token_contract_id: str, holder: str) -> int:
+        """SEP-41 ``balance(holder)`` in raw units (works for SACs and pure Soroban tokens). 0 when the
+        token has no entry for the holder (e.g. classic account without a trustline)."""
+        try:
+            return abi.decode_i128(await self.read(token_contract_id, "balance", abi.args_token_balance(holder)))
+        except StellarError as e:
+            if e.code not in ("simulation_failed", "abi_decode_error"):
+                raise  # RPC unreachable etc. must surface
+            log.debug("token_balance(%s, %s) -> 0: %s", token_contract_id, holder, e.message)
+            return 0
+
+    # --- Soroswap quotes --------------------------------------------------------------------
+
+    async def router_amounts_out(self, amount_in: int, path: list[str]) -> list[int]:
+        """``router_get_amounts_out(amount_in, path)`` via simulation on the allow-listed router."""
+        if amount_in <= 0:
+            raise ValidationError("amount_in must be positive", code="invalid_amount")
+        if len(path) < 2:
+            raise ValidationError("path needs at least two tokens", code="invalid_path")
+        try:
+            v = await self.read(self.router_id, RouterFn.GET_AMOUNTS_OUT, abi.args_router_amounts_out(amount_in, path))
+        except StellarError as e:
+            if e.code in ("simulation_failed", "auth_error"):  # no pair / router error -> no route
+                raise StellarError(
+                    f"no route for {path[0]} -> {path[-1]} on the router: {e.message}", code="quote_failed", details=e.details
+                ) from e
+            raise
+        return abi.decode_i128_vec(v)
+
+    async def router_quote(self, token_in: str, token_out: str, amount_in: int) -> int:
+        """Amount of ``token_out`` the router would deliver for ``amount_in`` (raw units)."""
+        if token_in == token_out:
+            return int(amount_in)
+        amounts = await self.router_amounts_out(amount_in, [token_in, token_out])
+        return int(amounts[-1]) if amounts else 0
+
+    async def quote(self, token_in: str, token_out: str, amount_in: int) -> RouterQuote:
+        out = await self.router_quote(token_in, token_out, amount_in)
+        return RouterQuote(token_in=token_in, token_out=token_out, amount_in=int(amount_in), amount_out=out, path=[token_in, token_out])
+
+    async def soroswap_api_quote(
+        self, token_in: str, token_out: str, amount_in: int, slippage_bps: int | None = None
+    ) -> RouterQuote | None:
+        """Optional Soroswap API quote (``POST {soroswap_api_url}/quote``, Bearer key, docs/refs/soroswap-sdk).
+        None when no API key is configured or the API is unavailable - never fails the caller."""
+        key = self._settings.soroswap_api_key
+        if not key:
+            return None
+        url = f"{self._settings.soroswap_api_url.rstrip('/')}/quote"
+        body = {
+            "assetIn": token_in,
+            "assetOut": token_out,
+            "amount": str(int(amount_in)),
+            "tradeType": "EXACT_IN",
+            "protocols": ["soroswap"],
+            "slippageBps": int(slippage_bps if slippage_bps is not None else self._settings.default_trade_slippage_bps),
+        }
+        network = "testnet" if self._settings.is_testnet else "mainnet"
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
+                r = await client.post(url, params={"network": network}, json=body, headers={"Authorization": f"Bearer {key}"})
+                r.raise_for_status()
+                data = r.json()
+        except Exception as e:  # noqa: BLE001 - optional enrichment only
+            log.warning("soroswap api quote unavailable: %s", e)
+            return None
+        try:
+            amount_out = int(str(data.get("amountOut") or 0))
+        except (TypeError, ValueError):
+            return None
+        impact = data.get("priceImpactPct")
+        return RouterQuote(
+            token_in=token_in,
+            token_out=token_out,
+            amount_in=int(amount_in),
+            amount_out=amount_out,
+            source="api",
+            path=[token_in, token_out],
+            price_impact_pct=Decimal(str(impact)) if impact is not None else None,
+            raw=data if isinstance(data, dict) else None,
+        )
+
+    # --- unsigned transaction builders ------------------------------------------------------
+
+    async def build_invoke(
+        self,
+        contract_id: str,
+        fn: str,
+        params: list[sx.SCVal],
+        source: str,
+        *,
+        kind: str,
+        summary: dict[str, Any] | None = None,
+    ) -> UnsignedTx:
+        """Simulate + assemble ``contract_id.fn(params)`` with ``source`` as the transaction source (and thus
+        the signer of every auth entry recorded for that address) and return the unsigned envelope."""
+        builder = (
+            TransactionBuilder(Account(source, 0), self.network_passphrase, base_fee=self._settings.base_fee_stroops)
+            .append_invoke_contract_function_op(contract_id, fn, params)
+            .set_timeout(self._settings.tx_timeout_seconds)
+        )
+        assembled: AssembledTransactionAsync[Any] = AssembledTransactionAsync(
+            builder, self.server, None, None, self._settings.tx_submit_timeout_seconds
+        )
+        try:
+            await assembled.simulate(restore=False)
+        except SimulationFailedError as e:
+            err = assembled.simulation.error if assembled.simulation is not None else str(e)
+            self._raise_simulation_error(err, fn, contract_id=contract_id)
+        except AssembledTransactionError as e:
+            raise StellarError(f"{fn}: {type(e).__name__}: {e}", code="simulation_failed") from e
+        except Exception as e:
+            raise self._wrap(e, fn) from e
+        if assembled.simulation is not None and assembled.simulation.restore_preamble is not None:
+            raise StellarError(
+                f"{fn}: archived ledger entries must be restored before this call", code="restore_required"
+            )
+        built = assembled.built_transaction
+        if built is None:  # pragma: no cover - simulate() always assembles on success
+            raise StellarError(f"{fn}: transaction was not assembled", code="simulation_failed")
+        xdr = assembled.to_xdr()
+        try:
+            result_native = native_of(assembled.result())
+        except Exception:  # noqa: BLE001 - void return / no result entry
+            result_native = None
+        info: dict[str, Any] = {
+            "kind": kind,
+            "function": fn,
+            "contract_id": contract_id,
+            "source": source,
+            "network": self._settings.stellar_network,
+            "fee_stroops": int(built.transaction.fee),
+            "sequence": int(built.transaction.sequence),
+            "simulated_result": result_native,
+        }
+        if summary:
+            info.update(summary)
+        expires_at = _expiry(built, self._settings.tx_timeout_seconds)
+        info["expires_at"] = expires_at.isoformat()
+        return UnsignedTx(
+            xdr=xdr,
+            network_passphrase=self.network_passphrase,
+            expires_at=expires_at,
+            summary=info,
+            hash=built.hash_hex(),
+            kind=kind,
+        )
+
+    async def build_open(self, customer: str, terms: Terms) -> UnsignedTx:
+        terms.validate()
+        if customer != terms.customer:
+            raise VaultContractError(abi.VaultError.Unauthorized, context="open: customer must equal terms.customer")
+        return await self.build_invoke(
+            self.vault, Fn.OPEN, abi.args_open(customer, terms), customer, kind="open", summary={"terms": terms.as_dict()}
+        )
+
+    async def build_propose(self, trader: str, terms: Terms) -> UnsignedTx:
+        terms.validate()
+        if trader != terms.trader:
+            raise VaultContractError(abi.VaultError.Unauthorized, context="propose: trader must equal terms.trader")
+        return await self.build_invoke(
+            self.vault, Fn.PROPOSE, abi.args_propose(trader, terms), trader, kind="propose", summary={"terms": terms.as_dict()}
+        )
+
+    async def build_fund(self, customer: str, agreement_id: int) -> UnsignedTx:
+        return await self.build_invoke(
+            self.vault, Fn.FUND, abi.args_id(agreement_id), customer, kind="fund", summary={"agreement_id": int(agreement_id)}
+        )
+
+    async def build_accept(self, trader: str, agreement_id: int) -> UnsignedTx:
+        return await self.build_invoke(
+            self.vault, Fn.ACCEPT, abi.args_id(agreement_id), trader, kind="accept", summary={"agreement_id": int(agreement_id)}
+        )
+
+    async def build_cancel(self, who: str, agreement_id: int) -> UnsignedTx:
+        return await self.build_invoke(
+            self.vault,
+            Fn.CANCEL,
+            abi.args_cancel(agreement_id, who),
+            who,
+            kind="cancel",
+            summary={"agreement_id": int(agreement_id), "caller": who},
+        )
+
+    async def build_trade(
+        self,
+        trader: str,
+        agreement_id: int,
+        token_in: str,
+        token_out: str,
+        amount_in: int,
+        min_out: int,
+        deadline: int,
+    ) -> UnsignedTx:
+        if amount_in <= 0 or min_out <= 0:
+            raise VaultContractError(abi.VaultError.InvalidAmount, context="trade")
+        if token_in == token_out:
+            raise VaultContractError(abi.VaultError.TokenNotAllowed, context="trade: token_in == token_out")
+        return await self.build_invoke(
+            self.vault,
+            Fn.TRADE,
+            abi.args_trade(agreement_id, token_in, token_out, amount_in, min_out, deadline),
+            trader,
+            kind="trade",
+            summary={
+                "agreement_id": int(agreement_id),
+                "token_in": token_in,
+                "token_out": token_out,
+                "amount_in": int(amount_in),
+                "min_out": int(min_out),
+                "deadline": int(deadline),
+            },
+        )
+
+    async def build_settle(self, caller: str, agreement_id: int, min_outs: list[int]) -> UnsignedTx:
+        if any(int(m) < 0 for m in min_outs):
+            raise VaultContractError(abi.VaultError.InvalidAmount, context="settle: negative min_out")
+        return await self.build_invoke(
+            self.vault,
+            Fn.SETTLE,
+            abi.args_settle(agreement_id, caller, [int(m) for m in min_outs]),
+            caller,
+            kind="settle",
+            summary={"agreement_id": int(agreement_id), "caller": caller, "min_outs": [int(m) for m in min_outs]},
+        )
+
+    # admin (source = platform/admin key; signed by the operator, never by the backend)
+    async def build_set_token(self, admin: str, token: str, allowed: bool, is_base: bool) -> UnsignedTx:
+        return await self.build_invoke(
+            self.vault,
+            Fn.SET_TOKEN,
+            abi.args_set_token(token, allowed, is_base),
+            admin,
+            kind="admin",
+            summary={"token": token, "allowed": bool(allowed), "is_base": bool(is_base)},
+        )
+
+    async def build_set_paused(self, admin: str, paused: bool) -> UnsignedTx:
+        return await self.build_invoke(
+            self.vault, Fn.SET_PAUSED, abi.args_set_paused(paused), admin, kind="admin", summary={"paused": bool(paused)}
+        )
+
+    async def build_set_fees(self, admin: str, platform_fee_bps: int, fee_recipient: str) -> UnsignedTx:
+        return await self.build_invoke(
+            self.vault,
+            Fn.SET_FEES,
+            abi.args_set_fees(platform_fee_bps, fee_recipient),
+            admin,
+            kind="admin",
+            summary={"platform_fee_bps": int(platform_fee_bps), "fee_recipient": fee_recipient},
+        )
+
+    # --- classic (Horizon-free: sequence via RPC getLedgerEntries) --------------------------
+
+    async def _load_account(self, account_id: str, context: str) -> Account:
+        try:
+            return await self.server.load_account(account_id)
+        except Exception as e:
+            raise self._wrap(e, context) from e
+
+    def _classic_unsigned(self, builder: TransactionBuilder, kind: str, summary: dict[str, Any]) -> UnsignedTx:
+        builder.set_timeout(self._settings.tx_timeout_seconds)
+        try:
+            built = builder.build()
+        except (SdkError, ValueError) as e:
+            raise StellarError(f"{kind}: cannot build transaction: {e}", code="build_failed") from e
+        expires_at = _expiry(built, self._settings.tx_timeout_seconds)
+        info = {"kind": kind, "network": self._settings.stellar_network, "fee_stroops": int(built.transaction.fee)}
+        info.update(summary)
+        info["expires_at"] = expires_at.isoformat()
+        return UnsignedTx(
+            xdr=built.to_xdr(),
+            network_passphrase=self.network_passphrase,
+            expires_at=expires_at,
+            summary=info,
+            hash=built.hash_hex(),
+            kind=kind,
+        )
+
+    async def build_payment(
+        self,
+        source: str,
+        destination: str,
+        asset_code: str,
+        issuer: str | None,
+        amount: Decimal | str,
+        memo: str | int | None = None,
+        memo_type: str | None = None,
+    ) -> UnsignedTx:
+        """Unsigned classic payment (wallet withdraw to an external address / anchor withdraw leg). A native
+        payment to an account that does not exist yet becomes ``create_account``."""
+        ref = AssetRef.of(asset_code, issuer)
+        amt = Decimal(str(amount))
+        if amt <= 0:
+            raise ValidationError("amount must be positive", code="invalid_amount")
+        if source == destination:
+            raise ValidationError("destination must differ from the source", code="invalid_destination")
+        account = await self._load_account(source, "build_payment")
+        dest_exists = await self.account_exists(destination)
+        builder = TransactionBuilder(account, self.network_passphrase, base_fee=self._settings.base_fee_stroops)
+        op = "payment"
+        if dest_exists:
+            builder.append_payment_op(destination, to_sdk_asset(ref), amount_str(amt))
+        elif ref.is_native:
+            op = "create_account"
+            builder.append_create_account_op(destination, amount_str(amt))
+        else:
+            raise AccountNotFoundError(
+                f"destination {destination} does not exist; it must be created (funded with XLM) before receiving {ref.canonical}",
+                details={"account": destination},
+            )
+        apply_memo(builder, memo, memo_type)
+        return self._classic_unsigned(
+            builder,
+            "payment",
+            {
+                "operation": op,
+                "source": source,
+                "destination": destination,
+                "asset": ref.canonical,
+                "asset_code": ref.code,
+                "asset_issuer": ref.issuer,
+                "amount": amount_str(amt),
+                "memo": memo,
+                "memo_type": memo_type if memo not in (None, "") else None,
+            },
+        )
+
+    async def build_change_trust(self, source: str, asset_code: str, issuer: str, limit: Decimal | str | None = None) -> UnsignedTx:
+        """Unsigned ``change_trust`` (needed before an anchor can deliver a non-native asset)."""
+        ref = AssetRef.of(asset_code, issuer)
+        if ref.is_native:
+            raise ValidationError("native XLM needs no trustline", code="invalid_asset")
+        account = await self._load_account(source, "build_change_trust")
+        builder = TransactionBuilder(account, self.network_passphrase, base_fee=self._settings.base_fee_stroops)
+        builder.append_change_trust_op(to_sdk_asset(ref), limit=amount_str(limit) if limit is not None else None)
+        return self._classic_unsigned(
+            builder,
+            "trustline",
+            {"source": source, "asset": ref.canonical, "asset_code": ref.code, "asset_issuer": ref.issuer, "limit": amount_str(limit) if limit is not None else None},
+        )
+
+
+__all__ = [
+    "NULL_ACCOUNT",
+    "AgreementView",
+    "SorobanGateway",
+    "contract_error_from_diagnostics",
+    "native_of",
+    "tx_result_code",
+]

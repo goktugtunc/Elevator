@@ -1,0 +1,1809 @@
+"""Stellar Anchor integration — SEP-1 discovery, SEP-10 user-signed auth, SEP-24 interactive deposit /
+withdraw, SEP-12 KYC pass-through (DESIGN §3, Figma 8c "Yatır / Çek").
+
+Two layers live here:
+
+* ``AnchorClient`` — HTTP client for ONE anchor (``settings.anchor_home_domain`` by default). Everything
+  really talks to the anchor over HTTPS (httpx); nothing is mocked or hard-coded. ``discover()`` fetches and
+  caches ``/.well-known/stellar.toml`` through ``stellar_sdk.sep.stellar_toml.fetch_stellar_toml_async``
+  (validating ``NETWORK_PASSPHRASE`` against ours), ``challenge()`` fetches a SEP-10 challenge and verifies
+  it (server signature = toml ``SIGNING_KEY``, sequence 0, time bounds, ``home_domain`` vs
+  ``web_auth_domain`` handled separately) before it is handed to the mobile, ``token()`` posts the
+  user-signed challenge back (never to the network), ``deposit_interactive`` / ``withdraw_interactive``
+  start SEP-24 flows, ``get_transaction`` / ``list_transactions`` poll them, ``kyc_put`` / ``kyc_get``
+  proxy SEP-12.
+* DB-side flows (``start_interactive``, ``sync_user_transactions``, ``build_withdraw_payment``, ...) that
+  keep ``anchor_sessions`` (JWT AES-GCM encrypted, never sent to the mobile) and ``anchor_transactions``
+  (raw SEP-24 status state machine + notifications) in sync. Services flush; the request / worker owns
+  the commit.
+
+Anchor-skill gotchas honoured: the challenge is never submitted; ``home_domain`` and ``web_auth_domain``
+are verified independently; amounts stay decimal strings; the status state machine covers
+``pending_trust`` / ``pending_user`` / ``on_hold`` / ...; 401 **and** 403 from the anchor mean "run SEP-10
+again" (the backend cannot re-auth without the user's signature, so it drops the session and returns
+``anchor_auth_required``); ``asset_code`` is always paired with ``asset_issuer``; ``/info`` is the contract.
+
+Stellar Skills used (cite by path in the README, hackathon handbook "Official Stellar Skills"):
+``CheesecakeLabs/stellar-anchor-skill/SKILL.md``, ``references/client/discovery-and-auth.md``,
+``references/client/sep24-interactive.md``, ``references/testing/testing-and-validation.md`` (local copies in
+``docs/refs/``), plus ``skills/standards/SKILL.md`` for the SEP map.
+
+NOTE: this module imports ``stellar_sdk`` (SEP helpers) although it is not under ``app.services.stellar``;
+the SEP-1/SEP-10 verification primitives are the SDK's and re-wrapping them would only hide the checks.
+"""
+from __future__ import annotations
+
+import asyncio
+import logging
+import time
+import uuid
+from collections import deque
+from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
+from decimal import Decimal, InvalidOperation
+from typing import Any
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+
+import httpx
+import jwt as pyjwt
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from stellar_sdk import TransactionEnvelope
+from stellar_sdk.client.base_async_client import BaseAsyncClient
+from stellar_sdk.client.response import Response as SdkResponse
+from stellar_sdk.operation import ManageData
+from stellar_sdk.sep import stellar_toml
+from stellar_sdk.sep import stellar_web_authentication as swa
+from stellar_sdk.sep.exceptions import InvalidSep10ChallengeError, StellarTomlNotFoundError
+from stellar_sdk.strkey import StrKey
+
+from app.core.config import Settings, get_settings
+from app.core.errors import (
+    AppError,
+    ForbiddenError,
+    InsufficientFundsError,
+    NotFoundError,
+    StateError,
+    ValidationError,
+)
+from app.core.security import decrypt_secret, encrypt_secret
+from app.models import (
+    AnchorSession,
+    AnchorTransaction,
+    AnchorTxKind,
+    AnchorTxStatus,
+    NotificationCategory,
+    PendingTransaction,
+    PendingTxKind,
+    User,
+)
+from app.schemas.anchor import (
+    AnchorAction,
+    AnchorAssetOut,
+    AnchorFeaturesOut,
+    AnchorInfoOut,
+    AnchorSessionOut,
+    AnchorTransactionOut,
+    ChallengeOut,
+    InteractiveOut,
+    KycIn,
+    KycOut,
+)
+from app.services.agreements import record_pending
+from app.services.notifications import notify
+from app.services.stellar.types import UnsignedTx
+
+log = logging.getLogger(__name__)
+
+TOML_CACHE_SECONDS = 600.0
+INFO_CACHE_SECONDS = 60.0
+HTTP_TIMEOUT = httpx.Timeout(20.0, connect=10.0)
+DEFAULT_JWT_TTL = timedelta(minutes=15)  # when the anchor JWT carries no `exp`
+USER_AGENT = "elevator-api/1.0 (SEP-10/24 client)"
+NATIVE = "native"
+AUTH_REQUIRED_STATUSES = (401, 403)
+MAX_PAYMENT_PAGES = 5
+
+
+# --- errors -------------------------------------------------------------------------------------------
+
+
+class AnchorError(AppError):
+    """The anchor is unreachable, answered with an error or violated the SEP."""
+
+    status_code = 502
+    code = "anchor_error"
+
+
+class AnchorAuthRequiredError(AppError):
+    """No valid anchor session (missing / expired / rejected with 401 or 403): the mobile must run
+    ``POST /anchor/auth/challenge`` -> sign -> ``POST /anchor/auth/token`` again, then retry."""
+
+    status_code = 401
+    code = "anchor_auth_required"
+
+
+class AnchorDisabledError(AppError):
+    status_code = 409
+    code = "anchor_disabled"
+
+
+class AnchorRateLimitedError(AppError):
+    status_code = 429
+    code = "rate_limited"
+
+
+# --- SEP-24 status state machine (gotcha #8) --------------------------------------------------------------
+
+_ACTIONS: dict[str, AnchorAction] = {
+    AnchorTxStatus.incomplete: "open_interactive",
+    AnchorTxStatus.pending_user_transfer_start: "send_payment",
+    AnchorTxStatus.pending_user_transfer_complete: "wait",
+    AnchorTxStatus.pending_external: "wait",
+    AnchorTxStatus.pending_anchor: "wait",
+    AnchorTxStatus.pending_stellar: "wait",
+    AnchorTxStatus.pending_trust: "add_trustline",
+    AnchorTxStatus.pending_user: "open_interactive",
+    AnchorTxStatus.on_hold: "wait",
+    AnchorTxStatus.completed: "none",
+    AnchorTxStatus.refunded: "none",
+    AnchorTxStatus.expired: "retry",
+    AnchorTxStatus.no_market: "retry",
+    AnchorTxStatus.too_small: "retry",
+    AnchorTxStatus.too_large: "retry",
+    AnchorTxStatus.error: "retry",
+}
+
+_LABELS_TR: dict[str, str] = {
+    AnchorTxStatus.incomplete: "Not finished yet",
+    AnchorTxStatus.pending_user_transfer_start: "Waiting for your transfer",
+    AnchorTxStatus.pending_user_transfer_complete: "Transfer received, paying out",
+    AnchorTxStatus.pending_external: "With your bank",
+    AnchorTxStatus.pending_anchor: "The anchor is processing it",
+    AnchorTxStatus.pending_stellar: "Waiting for the Stellar network",
+    AnchorTxStatus.pending_trust: "Trustline needed",
+    AnchorTxStatus.pending_user: "The anchor needs something from you",
+    AnchorTxStatus.on_hold: "Under compliance review",
+    AnchorTxStatus.completed: "Completed",
+    AnchorTxStatus.refunded: "Refunded",
+    AnchorTxStatus.expired: "Expired",
+    AnchorTxStatus.no_market: "No market",
+    AnchorTxStatus.too_small: "Amount too small",
+    AnchorTxStatus.too_large: "Amount too large",
+    AnchorTxStatus.error: "Failed",
+}
+
+_ACTION_LABELS_TR: dict[str, str] = {
+    "open_interactive": "Open the anchor page and finish the form",
+    "send_payment": "Sign the payment to the anchor's account",
+    "add_trustline": "Add a trustline for the asset",
+    "wait": "In progress — nothing to do",
+    "none": "",
+    "retry": "Start the transfer again",
+}
+
+
+def action_for(status: str, kind: AnchorTxKind | str) -> AnchorAction:
+    action = _ACTIONS.get(status, "wait")
+    if action == "send_payment" and AnchorTxKind(kind) is AnchorTxKind.deposit:
+        return "wait"  # a deposit never asks the user to pay
+    return action
+
+
+def status_label(status: str) -> str:
+    return _LABELS_TR.get(status, status.replace("_", " "))
+
+
+def action_label(action: str) -> str:
+    return _ACTION_LABELS_TR.get(action, "")
+
+
+def is_terminal(status: str) -> bool:
+    try:
+        return AnchorTxStatus(status).is_terminal
+    except ValueError:
+        return False
+
+
+# --- helpers ------------------------------------------------------------------------------------------
+
+
+def now_utc() -> datetime:
+    return datetime.now(UTC)
+
+
+def normalize_asset_code(code: str) -> str:
+    """Anchor asset code: ``XLM``/``native`` -> ``native``; everything else upper-cased."""
+    c = (code or "").strip()
+    if c.lower() in (NATIVE, "xlm"):
+        return NATIVE
+    return c.upper()
+
+
+def display_code(code: str) -> str:
+    return "XLM" if code == NATIVE else code
+
+
+def classic_code(code: str) -> str:
+    """Anchor code -> what the Stellar gateways expect (``XLM`` for native)."""
+    return "XLM" if code == NATIVE else code
+
+
+def _decimal(value: Any) -> Decimal | None:
+    if value is None or value == "":
+        return None
+    try:
+        d = Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return None
+    return d if d.is_finite() else None
+
+
+def _parse_dt(value: Any) -> datetime | None:
+    if not value or not isinstance(value, str):
+        return None
+    v = value.strip()
+    if v.endswith("Z"):
+        v = v[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(v)
+    except ValueError:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
+
+
+def with_query(url: str, **params: str) -> str:
+    """Append query parameters to a URL (used for ``callback=postMessage`` on interactive urls)."""
+    parts = urlparse(url)
+    query = dict(parse_qsl(parts.query, keep_blank_values=True))
+    query.update({k: v for k, v in params.items() if v is not None})
+    return urlunparse(parts._replace(query=urlencode(query)))
+
+
+def is_g_account(address: str | None) -> bool:
+    try:
+        return bool(address) and StrKey.is_valid_ed25519_public_key(address)  # type: ignore[arg-type]
+    except Exception:  # noqa: BLE001 - strkey raises a zoo of ValueErrors
+        return False
+
+
+def base_account(sub: str) -> str:
+    """SEP-10 JWT ``sub`` -> G... account (``G...:memo`` keeps the memo out; ``M...`` is decoded)."""
+    account = sub.split(":", 1)[0]
+    if account.startswith("M"):
+        try:
+            from stellar_sdk.muxed_account import MuxedAccount
+
+            return MuxedAccount.from_account(account).account_id
+        except Exception:  # noqa: BLE001
+            return account
+    return account
+
+
+# --- rate limiting (DESIGN §3.2 security) -----------------------------------------------------------------
+
+_rate: dict[tuple[str, str], deque[float]] = {}
+
+
+def check_rate_limit(key: str, bucket: str, limit: int, window_seconds: float = 60.0) -> None:
+    """In-process sliding window per (key, bucket). Raises 429 ``rate_limited`` above `limit` calls."""
+    now = time.monotonic()
+    q = _rate.setdefault((key, bucket), deque())
+    while q and now - q[0] > window_seconds:
+        q.popleft()
+    if len(q) >= limit:
+        raise AnchorRateLimitedError(
+            f"too many {bucket} requests; retry in a minute",
+            details={"bucket": bucket, "limit": limit, "window_seconds": window_seconds},
+        )
+    q.append(now)
+
+
+def reset_rate_limits() -> None:
+    _rate.clear()
+
+
+# --- discovery types -----------------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class AnchorCurrency:
+    code: str  # anchor code (`native` for XLM)
+    issuer: str | None
+    contract: str | None = None
+    description: str | None = None
+    status: str | None = None
+
+    @property
+    def needs_trustline(self) -> bool:
+        return self.code != NATIVE and self.issuer is not None
+
+
+@dataclass(frozen=True)
+class AnchorDiscovery:
+    """What we keep from ``stellar.toml`` (DESIGN §3.1 step 1)."""
+
+    domain: str
+    signing_key: str
+    network_passphrase: str
+    web_auth_endpoint: str
+    transfer_server_sep24: str | None
+    transfer_server: str | None
+    kyc_server: str | None
+    anchor_quote_server: str | None
+    currencies: tuple[AnchorCurrency, ...]
+    fetched_at: datetime
+    raw: dict[str, Any] = field(default_factory=dict, compare=False, repr=False)
+
+    @property
+    def web_auth_domain(self) -> str:
+        """Host of WEB_AUTH_ENDPOINT — NOT the home domain (gotcha #2)."""
+        parts = urlparse(self.web_auth_endpoint)
+        host = parts.hostname or ""
+        return f"{host}:{parts.port}" if parts.port else host
+
+    def currency(self, code: str) -> AnchorCurrency | None:
+        wanted = normalize_asset_code(code)
+        for c in self.currencies:
+            if c.code == wanted:
+                return c
+        return None
+
+
+@dataclass(frozen=True)
+class ChallengeResult:
+    transaction: str
+    network_passphrase: str
+    home_domain: str
+    web_auth_domain: str
+    signing_key: str
+    account: str
+    expires_at: datetime
+
+
+@dataclass(frozen=True)
+class TokenResult:
+    token: str
+    sub: str
+    account: str
+    expires_at: datetime
+    claims: dict[str, Any]
+
+
+# --- httpx adapter for the SDK's TOML fetcher ---------------------------------------------------------------
+
+
+class _HttpxSdkClient(BaseAsyncClient):
+    """Minimal ``BaseAsyncClient`` over httpx so ``fetch_stellar_toml_async`` shares our HTTP stack (and
+    is mockable with respx)."""
+
+    def __init__(self, http: httpx.AsyncClient) -> None:
+        self._http = http
+
+    async def get(self, url: str, params: dict[str, str] | None = None, max_content_size: int | None = None) -> SdkResponse:
+        try:
+            r = await self._http.get(url, params=params, headers={"Accept": "text/plain, application/toml, */*"})
+        except httpx.HTTPError as e:
+            raise AnchorError(f"cannot fetch {url}: {e.__class__.__name__}", code="anchor_unreachable") from e
+        if max_content_size is not None and len(r.content) > max_content_size:
+            raise AnchorError("stellar.toml exceeds the allowed size", code="anchor_toml_invalid")
+        return SdkResponse(status_code=r.status_code, text=r.text, headers=dict(r.headers), url=str(r.url))
+
+    async def post(self, url: str, data: dict[str, str] | None = None, json_data: dict[str, Any] | None = None) -> SdkResponse:
+        try:
+            r = await self._http.post(url, data=data, json=json_data)
+        except httpx.HTTPError as e:
+            raise AnchorError(f"cannot post {url}: {e.__class__.__name__}", code="anchor_unreachable") from e
+        return SdkResponse(status_code=r.status_code, text=r.text, headers=dict(r.headers), url=str(r.url))
+
+    def stream(self, url: str, params: dict[str, str] | None = None):  # pragma: no cover - not used
+        raise NotImplementedError("streaming is not supported by the anchor client")
+
+    async def close(self) -> None:  # pragma: no cover - the owner closes the httpx client
+        return None
+
+
+# --- caches --------------------------------------------------------------------------------------------
+
+_toml_cache: dict[str, tuple[float, AnchorDiscovery]] = {}
+_info_cache: dict[tuple[str, str], tuple[float, dict[str, Any]]] = {}
+
+
+def reset_cache() -> None:
+    """Test hook: forget cached stellar.toml / info documents."""
+    _toml_cache.clear()
+    _info_cache.clear()
+
+
+# --- the client -----------------------------------------------------------------------------------------
+
+
+class AnchorClient:
+    """HTTP client for one anchor home domain. Stateless apart from caches; safe to share."""
+
+    def __init__(self, settings: Settings, *, domain: str | None = None) -> None:
+        self.settings = settings
+        self.domain = (domain or settings.anchor_home_domain).strip().lower()
+        self._http: httpx.AsyncClient | None = None
+        self._http_loop: asyncio.AbstractEventLoop | None = None
+
+    # --- infrastructure ---------------------------------------------------------------------------------
+
+    @property
+    def http(self) -> httpx.AsyncClient:
+        loop = asyncio.get_running_loop()
+        if self._http is None or self._http_loop is not loop or self._http.is_closed:
+            self._http = httpx.AsyncClient(timeout=HTTP_TIMEOUT, follow_redirects=False, headers={"User-Agent": USER_AGENT})
+            self._http_loop = loop
+        return self._http
+
+    async def close(self) -> None:
+        if self._http is not None and not self._http.is_closed:
+            await self._http.aclose()
+        self._http = None
+        self._http_loop = None
+
+    def _ensure_enabled(self) -> None:
+        if not self.settings.anchor_enabled:
+            raise AnchorDisabledError("anchor integration is disabled (ANCHOR_ENABLED=false)")
+
+    async def _request(
+        self,
+        method: str,
+        url: str,
+        *,
+        token: str | None = None,
+        params: dict[str, Any] | None = None,
+        data: dict[str, Any] | None = None,
+        form: dict[str, Any] | None = None,
+        json: dict[str, Any] | None = None,
+        context: str,
+    ) -> dict[str, Any]:
+        """`data` -> application/x-www-form-urlencoded, `form` -> multipart/form-data (SEP-24 interactive and
+        SEP-12 PUT /customer require multipart or JSON; testanchor.stellar.org rejects urlencoded bodies)."""
+        headers = {"Accept": "application/json"}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        files = {k: (None, str(v)) for k, v in form.items()} if form else None
+        try:
+            r = await self.http.request(
+                method, url, params=params, data=data, files=files, json=json, headers=headers
+            )
+        except httpx.HTTPError as e:
+            raise AnchorError(
+                f"{context}: cannot reach anchor {self.domain}: {e.__class__.__name__}", code="anchor_unreachable"
+            ) from e
+        body: Any
+        try:
+            body = r.json() if r.content else {}
+        except ValueError:
+            body = {"error": r.text[:300]}
+        if r.status_code in AUTH_REQUIRED_STATUSES:
+            raise AnchorAuthRequiredError(
+                f"{context}: anchor rejected the session (HTTP {r.status_code}); authenticate again",
+                details={"status": r.status_code, "anchor": self.domain},
+            )
+        if r.status_code >= 400:
+            message = body.get("error") if isinstance(body, dict) else None
+            raise AnchorError(
+                f"{context}: anchor {self.domain} answered HTTP {r.status_code}: {message or 'no detail'}",
+                code="anchor_rejected",
+                details={"status": r.status_code, "body": body if isinstance(body, dict) else str(body)[:300]},
+            )
+        if not isinstance(body, dict):
+            raise AnchorError(f"{context}: anchor returned a non-object JSON body", code="anchor_invalid_response")
+        return body
+
+    # --- SEP-1 -----------------------------------------------------------------------------------------
+
+    async def discover(self, *, force: bool = False) -> AnchorDiscovery:
+        """Fetch + validate ``/.well-known/stellar.toml`` (cached ``TOML_CACHE_SECONDS``)."""
+        self._ensure_enabled()
+        cached = _toml_cache.get(self.domain)
+        if cached and not force and time.monotonic() - cached[0] < TOML_CACHE_SECONDS:
+            return cached[1]
+        try:
+            doc = await stellar_toml.fetch_stellar_toml_async(self.domain, client=_HttpxSdkClient(self.http))
+        except StellarTomlNotFoundError as e:
+            raise AnchorError(f"{self.domain} has no stellar.toml", code="anchor_toml_not_found") from e
+        except AnchorError:
+            raise
+        except Exception as e:  # toml parse errors, size limit
+            raise AnchorError(f"{self.domain}: invalid stellar.toml: {e.__class__.__name__}: {e}", code="anchor_toml_invalid") from e
+        disc = parse_toml(self.domain, dict(doc), expected_passphrase=self.settings.network_passphrase)
+        _toml_cache[self.domain] = (time.monotonic(), disc)
+        log.info(
+            "anchor %s discovered: sep24=%s sep6=%s currencies=%s",
+            self.domain, disc.transfer_server_sep24, disc.transfer_server, [c.code for c in disc.currencies],
+        )
+        return disc
+
+    # --- transfer server (SEP-24 or SEP-6) ---------------------------------------------------------------
+
+    async def transfer_base(self) -> tuple[str, str]:
+        """``(base_url, protocol)`` of the transfer server to talk to.
+
+        SEP-24 is preferred when the anchor offers it: the anchor drives KYC and the amount in its own
+        web flow, so there is less for us to get wrong. Anchors that only ramp fiat programmatically —
+        like the TRY anchor — advertise SEP-6 instead, and then every field is ours to fill in.
+        ``/info``, ``/transaction`` and ``/transactions`` are shaped the same on both.
+        """
+        disc = await self.discover()
+        if disc.transfer_server_sep24:
+            return disc.transfer_server_sep24, "sep24"
+        if disc.transfer_server:
+            return disc.transfer_server, "sep6"
+        raise AnchorError(
+            f"{self.domain} advertises neither TRANSFER_SERVER_SEP0024 nor TRANSFER_SERVER",
+            code="anchor_no_transfer_server",
+        )
+
+    async def protocol(self) -> str:
+        return (await self.transfer_base())[1]
+
+    # --- /info ------------------------------------------------------------------------------------------
+
+    async def info(self, *, lang: str | None = None, force: bool = False) -> dict[str, Any]:
+        """``GET {transfer server}/info`` (no auth), cached per language for ``INFO_CACHE_SECONDS``."""
+        base, _ = await self.transfer_base()
+        lang = lang or self.settings.anchor_lang
+        key = (self.domain, lang)
+        cached = _info_cache.get(key)
+        if cached and not force and time.monotonic() - cached[0] < INFO_CACHE_SECONDS:
+            return cached[1]
+        body = await self._request("GET", f"{base}/info", params={"lang": lang}, context="info")
+        if not isinstance(body.get("deposit"), dict) or not isinstance(body.get("withdraw"), dict):
+            raise AnchorError("/info without deposit/withdraw blocks", code="anchor_invalid_response")
+        _info_cache[key] = (time.monotonic(), body)
+        return body
+
+    # --- SEP-10 ----------------------------------------------------------------------------------------
+
+    async def challenge(self, account: str, *, memo: int | None = None) -> ChallengeResult:
+        """GET the SEP-10 challenge for `account` and VERIFY it before returning it (step 2 of §3.1)."""
+        if not is_g_account(account):
+            raise ValidationError("SEP-10 needs a G... account (contract accounts use SEP-45)", code="anchor_requires_g_account")
+        disc = await self.discover()
+        params: dict[str, Any] = {"account": account, "home_domain": disc.domain}
+        if memo is not None:
+            params["memo"] = str(memo)
+        body = await self._request("GET", disc.web_auth_endpoint, params=params, context="challenge")
+        xdr = body.get("transaction")
+        if not isinstance(xdr, str) or not xdr:
+            raise AnchorError("challenge response has no `transaction`", code="anchor_invalid_response")
+        passphrase = body.get("network_passphrase") or disc.network_passphrase
+        if passphrase != self.settings.network_passphrase:
+            raise AnchorError(
+                "challenge is for another network", code="anchor_network_mismatch", details={"got": passphrase}
+            )
+        expires_at = verify_challenge(xdr, disc, account=account, network_passphrase=passphrase)
+        return ChallengeResult(
+            transaction=xdr,
+            network_passphrase=passphrase,
+            home_domain=disc.domain,
+            web_auth_domain=disc.web_auth_domain,
+            signing_key=disc.signing_key,
+            account=account,
+            expires_at=expires_at,
+        )
+
+    async def token(self, signed_xdr: str, *, account: str) -> TokenResult:
+        """POST the user-signed challenge back to the anchor and return its JWT (never sent to the mobile)."""
+        disc = await self.discover()
+        verify_challenge(signed_xdr, disc, account=account, network_passphrase=self.settings.network_passphrase, require_client_signature=True)
+        body = await self._request("POST", disc.web_auth_endpoint, json={"transaction": signed_xdr}, context="token")
+        token = body.get("token")
+        if not isinstance(token, str) or not token:
+            raise AnchorError("anchor returned no token", code="anchor_invalid_response", details={"body": body})
+        claims = decode_anchor_jwt(token)
+        sub = str(claims.get("sub") or account)
+        sub_account = base_account(sub)
+        if sub_account != account:
+            raise AnchorError(
+                "anchor JWT is for another account", code="anchor_invalid_response", details={"sub": sub, "account": account}
+            )
+        exp = claims.get("exp")
+        expires_at = datetime.fromtimestamp(int(exp), tz=UTC) if isinstance(exp, int | float) else now_utc() + DEFAULT_JWT_TTL
+        return TokenResult(token=token, sub=sub, account=sub_account, expires_at=expires_at, claims=claims)
+
+    # --- SEP-24 interactive -------------------------------------------------------------------------------
+
+    async def _interactive(
+        self,
+        kind: AnchorTxKind,
+        token: str,
+        *,
+        account: str,
+        asset_code: str,
+        asset_issuer: str | None,
+        amount: Decimal | None,
+        lang: str | None,
+        claimable_balance_supported: bool | None = None,
+        extra: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        disc = await self.discover()
+        if not disc.transfer_server_sep24:
+            raise AnchorError(f"{self.domain} does not advertise TRANSFER_SERVER_SEP0024", code="anchor_no_sep24")
+        code = normalize_asset_code(asset_code)
+        form: dict[str, str] = {"asset_code": code, "account": account, "lang": lang or self.settings.anchor_lang}
+        if code != NATIVE and asset_issuer:
+            form["asset_issuer"] = asset_issuer
+        if amount is not None:
+            form["amount"] = format(Decimal(amount), "f")
+        if kind is AnchorTxKind.deposit and claimable_balance_supported is not None:
+            form["claimable_balance_supported"] = "true" if claimable_balance_supported else "false"
+        if extra:
+            form.update({k: v for k, v in extra.items() if v is not None})
+        path = "deposit" if kind is AnchorTxKind.deposit else "withdraw"
+        body = await self._request(
+            "POST", f"{disc.transfer_server_sep24}/transactions/{path}/interactive", token=token, form=form, context=f"{path}_interactive"
+        )
+        if body.get("type") != "interactive_customer_info_needed" or not body.get("url") or not body.get("id"):
+            raise AnchorError(
+                f"unexpected {path} response type {body.get('type')!r}", code="anchor_invalid_response", details={"body": body}
+            )
+        return body
+
+    async def deposit_interactive(
+        self,
+        token: str,
+        *,
+        account: str,
+        asset_code: str,
+        asset_issuer: str | None,
+        amount: Decimal | None = None,
+        lang: str | None = None,
+        claimable_balance_supported: bool = False,
+        extra: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        return await self._interactive(
+            AnchorTxKind.deposit, token, account=account, asset_code=asset_code, asset_issuer=asset_issuer, amount=amount,
+            lang=lang, claimable_balance_supported=claimable_balance_supported, extra=extra,
+        )
+
+    async def withdraw_interactive(
+        self,
+        token: str,
+        *,
+        account: str,
+        asset_code: str,
+        asset_issuer: str | None,
+        amount: Decimal | None = None,
+        lang: str | None = None,
+        extra: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        return await self._interactive(
+            AnchorTxKind.withdraw, token, account=account, asset_code=asset_code, asset_issuer=asset_issuer, amount=amount,
+            lang=lang, extra=extra,
+        )
+
+    # --- SEP-6 (programmatic) ---------------------------------------------------------------------------
+
+    async def deposit_sep6(
+        self,
+        token: str,
+        *,
+        account: str,
+        asset_code: str,
+        amount: Decimal | None,
+        type_: str | None,
+        lang: str | None = None,
+        extra: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        """``GET {TRANSFER_SERVER}/deposit`` — returns the off-chain instructions directly.
+
+        Unlike SEP-24 there is no web page: the anchor answers with where to send the fiat
+        (``how`` / ``instructions``) and the user does that in their own bank.
+        """
+        disc = await self.discover()
+        if not disc.transfer_server:
+            raise AnchorError(f"{self.domain} does not advertise TRANSFER_SERVER", code="anchor_no_sep6")
+        params: dict[str, str] = {
+            "asset_code": normalize_asset_code(asset_code),
+            "account": account,
+            "lang": lang or self.settings.anchor_lang,
+        }
+        if amount is not None:
+            params["amount"] = format(Decimal(amount), "f")
+        if type_:
+            params["type"] = type_
+        if extra:
+            params.update({k: v for k, v in extra.items() if v is not None})
+        body = await self._request("GET", f"{disc.transfer_server}/deposit", token=token, params=params, context="deposit_sep6")
+        if not body.get("id"):
+            raise AnchorError("deposit response has no `id`", code="anchor_invalid_response", details={"body": body})
+        return body
+
+    async def withdraw_sep6(
+        self,
+        token: str,
+        *,
+        account: str,
+        asset_code: str,
+        amount: Decimal | None,
+        type_: str | None,
+        dest: str | None = None,
+        lang: str | None = None,
+        extra: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        """``GET {TRANSFER_SERVER}/withdraw`` — returns the anchor account + memo to pay."""
+        disc = await self.discover()
+        if not disc.transfer_server:
+            raise AnchorError(f"{self.domain} does not advertise TRANSFER_SERVER", code="anchor_no_sep6")
+        params: dict[str, str] = {
+            "asset_code": normalize_asset_code(asset_code),
+            "account": account,
+            "lang": lang or self.settings.anchor_lang,
+        }
+        if amount is not None:
+            params["amount"] = format(Decimal(amount), "f")
+        if type_:
+            params["type"] = type_
+        if dest:
+            params["dest"] = dest
+        if extra:
+            params.update({k: v for k, v in extra.items() if v is not None})
+        body = await self._request("GET", f"{disc.transfer_server}/withdraw", token=token, params=params, context="withdraw_sep6")
+        if not body.get("id") or not body.get("account_id"):
+            raise AnchorError(
+                "withdraw response has no `id` / `account_id`", code="anchor_invalid_response", details={"body": body}
+            )
+        return body
+
+    async def get_transaction(self, token: str, anchor_tx_id: str) -> dict[str, Any]:
+        """``GET {sep24}/transaction?id=`` -> the bare transaction object (the response is wrapped)."""
+        base, _ = await self.transfer_base()
+        body = await self._request(
+            "GET", f"{base}/transaction", token=token, params={"id": anchor_tx_id}, context="get_transaction"
+        )
+        tx = body.get("transaction")
+        if not isinstance(tx, dict) or not tx.get("id"):
+            raise AnchorError("transaction response is not wrapped in `transaction`", code="anchor_invalid_response")
+        return tx
+
+    async def list_transactions(
+        self,
+        token: str,
+        asset_code: str,
+        *,
+        kind: AnchorTxKind | None = None,
+        limit: int | None = None,
+        no_older_than: datetime | None = None,
+    ) -> list[dict[str, Any]]:
+        base, _ = await self.transfer_base()
+        params: dict[str, Any] = {"asset_code": normalize_asset_code(asset_code)}
+        if kind is not None:
+            params["kind"] = "deposit" if kind is AnchorTxKind.deposit else "withdrawal"
+        if limit is not None:
+            params["limit"] = str(int(limit))
+        if no_older_than is not None:
+            params["no_older_than"] = no_older_than.astimezone(UTC).isoformat().replace("+00:00", "Z")
+        body = await self._request(
+            "GET", f"{base}/transactions", token=token, params=params, context="list_transactions"
+        )
+        items = body.get("transactions")
+        if not isinstance(items, list):
+            raise AnchorError("transactions response has no `transactions` list", code="anchor_invalid_response")
+        return [t for t in items if isinstance(t, dict) and t.get("id")]
+
+    # --- SEP-12 ----------------------------------------------------------------------------------------
+
+    async def kyc_put(self, token: str, fields: dict[str, str], *, customer_id: str | None = None, type_: str | None = None) -> dict[str, Any]:
+        disc = await self.discover()
+        if not disc.kyc_server:
+            raise AnchorError(f"{self.domain} has no KYC_SERVER (SEP-12)", code="anchor_no_kyc")
+        form = dict(fields)
+        if customer_id:
+            form["id"] = customer_id
+        if type_:
+            form["type"] = type_
+        return await self._request("PUT", f"{disc.kyc_server}/customer", token=token, form=form, context="kyc_put")
+
+    async def kyc_get(self, token: str, *, customer_id: str | None = None, type_: str | None = None) -> dict[str, Any]:
+        disc = await self.discover()
+        if not disc.kyc_server:
+            raise AnchorError(f"{self.domain} has no KYC_SERVER (SEP-12)", code="anchor_no_kyc")
+        params: dict[str, str] = {}
+        if customer_id:
+            params["id"] = customer_id
+        if type_:
+            params["type"] = type_
+        return await self._request("GET", f"{disc.kyc_server}/customer", token=token, params=params, context="kyc_get")
+
+
+# --- pure helpers used by the client ------------------------------------------------------------------------
+
+
+def parse_toml(domain: str, doc: dict[str, Any], *, expected_passphrase: str) -> AnchorDiscovery:
+    """Validate the fields we rely on (SEP-1). Raises AnchorError on anything unusable."""
+    signing_key = doc.get("SIGNING_KEY")
+    if not is_g_account(signing_key):
+        raise AnchorError(f"{domain}: stellar.toml has no valid SIGNING_KEY", code="anchor_toml_invalid")
+    passphrase = doc.get("NETWORK_PASSPHRASE")
+    if passphrase != expected_passphrase:
+        raise AnchorError(
+            f"{domain}: anchor is on another network ({passphrase!r})",
+            code="anchor_network_mismatch",
+            details={"anchor": passphrase, "ours": expected_passphrase},
+        )
+    web_auth = doc.get("WEB_AUTH_ENDPOINT")
+    if not isinstance(web_auth, str) or not web_auth.startswith("https://"):
+        raise AnchorError(f"{domain}: WEB_AUTH_ENDPOINT missing or not https", code="anchor_toml_invalid")
+
+    def _https(key: str) -> str | None:
+        v = doc.get(key)
+        if v is None:
+            return None
+        if not isinstance(v, str) or not v.startswith("https://"):
+            raise AnchorError(f"{domain}: {key} must be https", code="anchor_toml_invalid")
+        return v.rstrip("/")
+
+    currencies: list[AnchorCurrency] = []
+    for cur in doc.get("CURRENCIES") or []:
+        if not isinstance(cur, dict) or not cur.get("code"):
+            continue
+        code = normalize_asset_code(str(cur["code"]))
+        issuer = cur.get("issuer")
+        if code != NATIVE and issuer is not None and not is_g_account(str(issuer)):
+            log.warning("anchor %s: currency %s has an invalid issuer, skipped", domain, code)
+            continue
+        currencies.append(
+            AnchorCurrency(
+                code=code,
+                issuer=None if code == NATIVE else (str(issuer) if issuer else None),
+                contract=str(cur["contract"]) if cur.get("contract") else None,
+                description=str(cur["desc"]) if cur.get("desc") else None,
+                status=str(cur["status"]) if cur.get("status") else None,
+            )
+        )
+    return AnchorDiscovery(
+        domain=domain,
+        signing_key=str(signing_key),
+        network_passphrase=str(passphrase),
+        web_auth_endpoint=web_auth.rstrip("/"),
+        transfer_server_sep24=_https("TRANSFER_SERVER_SEP0024"),
+        transfer_server=_https("TRANSFER_SERVER"),
+        kyc_server=_https("KYC_SERVER"),
+        anchor_quote_server=_https("ANCHOR_QUOTE_SERVER"),
+        currencies=tuple(currencies),
+        fetched_at=now_utc(),
+        raw=doc,
+    )
+
+
+def verify_challenge(
+    xdr: str,
+    disc: AnchorDiscovery,
+    *,
+    account: str,
+    network_passphrase: str,
+    require_client_signature: bool = False,
+) -> datetime:
+    """Run every SEP-10 client-side check before the mobile signs (or before we forward its signature):
+    server signature by ``SIGNING_KEY``, sequence 0, time bounds, first op ``"<home_domain> auth"`` sourced
+    by `account`, ``web_auth_domain`` op matching the host of WEB_AUTH_ENDPOINT (mandatory when it differs
+    from the home domain), only manage_data ops. Returns the challenge expiry (max time bound)."""
+    try:
+        parsed = swa.read_challenge_transaction(
+            challenge_transaction=xdr,
+            server_account_id=disc.signing_key,
+            home_domains=disc.domain,
+            web_auth_domain=disc.web_auth_domain,
+            network_passphrase=network_passphrase,
+        )
+    except InvalidSep10ChallengeError as e:
+        raise AnchorError(f"invalid SEP-10 challenge from {disc.domain}: {e}", code="anchor_challenge_invalid") from e
+    except Exception as e:  # malformed XDR etc.
+        raise AnchorError(f"unreadable SEP-10 challenge: {e.__class__.__name__}: {e}", code="anchor_challenge_invalid") from e
+    if parsed.client_account_id != account:
+        raise AnchorError(
+            "challenge is for another account", code="anchor_challenge_invalid",
+            details={"expected": account, "got": parsed.client_account_id},
+        )
+    tx = parsed.transaction.transaction
+    has_web_auth_op = any(isinstance(op, ManageData) and op.data_name == "web_auth_domain" for op in tx.operations)
+    if disc.web_auth_domain != disc.domain and not has_web_auth_op:
+        raise AnchorError(
+            "challenge lacks the web_auth_domain operation although auth is hosted on another domain",
+            code="anchor_challenge_invalid",
+            details={"home_domain": disc.domain, "web_auth_domain": disc.web_auth_domain},
+        )
+    if require_client_signature and len(parsed.transaction.signatures) < 2:
+        raise ValidationError("the challenge carries no user signature", code="challenge_unsigned")
+    bounds = tx.preconditions.time_bounds if tx.preconditions else None  # read_challenge_transaction guarantees it
+    max_time = int(bounds.max_time) if bounds else int(time.time()) + 900
+    return datetime.fromtimestamp(max_time, tz=UTC)
+
+
+def decode_anchor_jwt(token: str) -> dict[str, Any]:
+    """Claims of the anchor JWT WITHOUT signature verification (we do not hold the anchor's key; the
+    anchor verifies it on every call). Used only for `sub` / `exp` bookkeeping."""
+    try:
+        claims = pyjwt.decode(token, options={"verify_signature": False, "verify_exp": False, "verify_aud": False})
+    except pyjwt.PyJWTError:
+        return {}
+    return claims if isinstance(claims, dict) else {}
+
+
+def challenge_envelope(xdr: str, network_passphrase: str) -> TransactionEnvelope:
+    return TransactionEnvelope.from_xdr(xdr, network_passphrase)
+
+
+# --- singleton --------------------------------------------------------------------------------------------
+
+_client: AnchorClient | None = None
+_client_pinned = False
+
+
+def get_anchor_client() -> AnchorClient:
+    """Configured client for ``settings.anchor_home_domain`` (FastAPI dependency: ``anchor=AnchorDep``).
+    Re-created when the configured domain changes unless a client was injected with ``set_anchor_client``."""
+    global _client
+    settings = get_settings()
+    if _client is None or (not _client_pinned and _client.domain != settings.anchor_home_domain.strip().lower()):
+        _client = AnchorClient(settings)
+    return _client
+
+
+def set_anchor_client(client: AnchorClient | None) -> None:
+    """Test hook: inject a client (pinned regardless of settings); None resets to the lazy default."""
+    global _client, _client_pinned
+    _client = client
+    _client_pinned = client is not None
+
+
+# =====================================================================================================
+# DB-side flows
+# =====================================================================================================
+
+
+# --- sessions (anchor_sessions) --------------------------------------------------------------------------
+
+
+async def get_session(db: AsyncSession, user_id: uuid.UUID, domain: str) -> AnchorSession | None:
+    return (
+        await db.execute(
+            select(AnchorSession).where(AnchorSession.user_id == user_id, AnchorSession.anchor_domain == domain)
+        )
+    ).scalar_one_or_none()
+
+
+def session_out(domain: str, session: AnchorSession | None, now: datetime | None = None) -> AnchorSessionOut:
+    now = now or now_utc()
+    if session is None or session.is_expired(now):
+        return AnchorSessionOut(anchor_domain=domain, authenticated=False, account=None, expires_at=None)
+    return AnchorSessionOut(anchor_domain=domain, authenticated=True, account=session.account, expires_at=session.expires_at)
+
+
+async def store_session(
+    db: AsyncSession, settings: Settings, user: User, domain: str, *, account: str, token: str, expires_at: datetime
+) -> AnchorSession:
+    """Upsert the encrypted anchor JWT for (user, anchor). Flush only."""
+    blob = encrypt_secret(settings, token, associated=user.stellar_address)
+    session = await get_session(db, user.id, domain)
+    if session is None:
+        session = AnchorSession(user_id=user.id, anchor_domain=domain, account=account, jwt=blob, expires_at=expires_at)
+        db.add(session)
+    else:
+        session.account = account
+        session.jwt = blob
+        session.expires_at = expires_at
+    await db.flush()
+    return session
+
+
+def session_token(settings: Settings, session: AnchorSession, user: User) -> str:
+    try:
+        return decrypt_secret(settings, bytes(session.jwt), associated=user.stellar_address)
+    except Exception as e:  # noqa: BLE001 - key rotation / tampering: force a re-auth
+        raise AnchorAuthRequiredError("stored anchor session cannot be decrypted; authenticate again") from e
+
+
+async def drop_session(db: AsyncSession, session: AnchorSession | None) -> None:
+    if session is not None:
+        await db.delete(session)
+        await db.flush()
+
+
+async def require_token(db: AsyncSession, settings: Settings, user: User, domain: str) -> tuple[AnchorSession, str]:
+    """Valid session + decrypted JWT or ``AnchorAuthRequiredError`` (401 anchor_auth_required)."""
+    session = await get_session(db, user.id, domain)
+    if session is None:
+        raise AnchorAuthRequiredError("no anchor session; run SEP-10 first", details={"anchor": domain})
+    if session.is_expired(now_utc()):
+        await drop_session(db, session)
+        raise AnchorAuthRequiredError("anchor session expired; run SEP-10 again", details={"anchor": domain})
+    if session.account != user.stellar_address:
+        await drop_session(db, session)
+        raise AnchorAuthRequiredError("anchor session belongs to another account; run SEP-10 again")
+    return session, session_token(settings, session, user)
+
+
+async def _auth_failed(db: AsyncSession, user: User, domain: str) -> None:
+    """The anchor answered 401/403: the stored JWT is dead. Drop it so the mobile re-authenticates."""
+    await drop_session(db, await get_session(db, user.id, domain))
+
+
+# --- challenge / token entry points ---------------------------------------------------------------------------
+
+
+async def challenge_for_user(client: AnchorClient, user: User, *, memo: int | None = None) -> ChallengeOut:
+    client._ensure_enabled()
+    check_rate_limit(str(user.id), "anchor_challenge", limit=20)
+    res = await client.challenge(user.stellar_address, memo=memo)
+    return ChallengeOut(
+        transaction=res.transaction,
+        network_passphrase=res.network_passphrase,
+        home_domain=res.home_domain,
+        web_auth_domain=res.web_auth_domain,
+        signing_key=res.signing_key,
+        account=res.account,
+        expires_at=res.expires_at,
+    )
+
+
+async def exchange_token(db: AsyncSession, settings: Settings, client: AnchorClient, user: User, signed_xdr: str) -> AnchorSessionOut:
+    client._ensure_enabled()
+    check_rate_limit(str(user.id), "anchor_token", limit=20)
+    res = await client.token(signed_xdr, account=user.stellar_address)
+    session = await store_session(
+        db, settings, user, client.domain, account=res.account, token=res.token, expires_at=res.expires_at
+    )
+    log.info("anchor session stored user=%s anchor=%s exp=%s", user.id, client.domain, res.expires_at.isoformat())
+    return session_out(client.domain, session)
+
+
+# --- /info ----------------------------------------------------------------------------------------------------
+
+
+def _limits(block: dict[str, Any] | None) -> dict[str, Any]:
+    block = block or {}
+    return {
+        "enabled": bool(block.get("enabled", False)),
+        "min": _decimal(block.get("min_amount")),
+        "max": _decimal(block.get("max_amount")),
+        "fee_fixed": _decimal(block.get("fee_fixed")),
+        "fee_percent": _decimal(block.get("fee_percent")),
+    }
+
+
+def offered_codes(settings: Settings) -> list[str]:
+    return [normalize_asset_code(c) for c in settings.anchor_asset_list]
+
+
+def anchor_assets(settings: Settings, disc: AnchorDiscovery, info: dict[str, Any]) -> list[AnchorAssetOut]:
+    """Allow-listed anchor assets (``ANCHOR_ASSETS``) merged with ``/info`` limits and toml issuers."""
+    out: list[AnchorAssetOut] = []
+    for code in offered_codes(settings):
+        cur = disc.currency(code)
+        dep = _limits(info.get("deposit", {}).get(code))
+        wd = _limits(info.get("withdraw", {}).get(code))
+        if cur is None and not dep["enabled"] and not wd["enabled"]:
+            continue  # the anchor does not know this asset at all
+        issuer = cur.issuer if cur else None
+        out.append(
+            AnchorAssetOut(
+                code=code,
+                display_code=display_code(code),
+                issuer=issuer,
+                needs_trustline=code != NATIVE and issuer is not None,
+                deposit_enabled=dep["enabled"],
+                deposit_min=dep["min"],
+                deposit_max=dep["max"],
+                deposit_fee_fixed=dep["fee_fixed"],
+                deposit_fee_percent=dep["fee_percent"],
+                withdraw_enabled=wd["enabled"],
+                withdraw_min=wd["min"],
+                withdraw_max=wd["max"],
+                withdraw_fee_fixed=wd["fee_fixed"],
+                withdraw_fee_percent=wd["fee_percent"],
+                description=cur.description if cur else None,
+            )
+        )
+    return out
+
+
+async def anchor_info(
+    db: AsyncSession, settings: Settings, client: AnchorClient, user: User | None, *, lang: str | None = None
+) -> AnchorInfoOut:
+    lang = lang or settings.anchor_lang
+    if not settings.anchor_enabled:
+        return AnchorInfoOut(enabled=False, home_domain=settings.anchor_home_domain, lang=lang)
+    session = session_out(client.domain, await get_session(db, user.id, client.domain)) if user is not None else None
+    try:
+        disc = await client.discover()
+        info = await client.info(lang=lang)
+    except AnchorError as e:
+        log.warning("anchor info unavailable: %s", e.message)
+        return AnchorInfoOut(enabled=True, home_domain=client.domain, lang=lang, session=session, error=e.message)
+    features = info.get("features") or {}
+    return AnchorInfoOut(
+        enabled=True,
+        home_domain=disc.domain,
+        network_passphrase=disc.network_passphrase,
+        signing_key=disc.signing_key,
+        web_auth_endpoint=disc.web_auth_endpoint,
+        web_auth_domain=disc.web_auth_domain,
+        transfer_server_sep24=disc.transfer_server_sep24,
+        kyc_server=disc.kyc_server,
+        features=AnchorFeaturesOut(
+            account_creation=bool(features.get("account_creation", False)),
+            claimable_balances=bool(features.get("claimable_balances", False)),
+        ),
+        assets=anchor_assets(settings, disc, info),
+        lang=lang,
+        session=session,
+        fetched_at=disc.fetched_at,
+    )
+
+
+# --- asset resolution -------------------------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ResolvedAnchorAsset:
+    code: str  # anchor code (`native` or issued code)
+    issuer: str | None
+    deposit: dict[str, Any]
+    withdraw: dict[str, Any]
+    features: dict[str, Any]
+
+
+async def resolve_anchor_asset(
+    settings: Settings, client: AnchorClient, asset_code: str, asset_issuer: str | None, *, lang: str | None = None
+) -> ResolvedAnchorAsset:
+    """(code, issuer) the anchor understands, checked against ANCHOR_ASSETS, the toml and ``/info``."""
+    code = normalize_asset_code(asset_code)
+    if code not in offered_codes(settings):
+        raise ValidationError(
+            f"asset {display_code(code)} is not offered through the anchor",
+            code="asset_not_offered",
+            details={"offered": [display_code(c) for c in offered_codes(settings)]},
+        )
+    disc = await client.discover()
+    cur = disc.currency(code)
+    issuer = cur.issuer if cur else None
+    if code != NATIVE:
+        if issuer is None:
+            raise AnchorError(f"anchor toml lists no issuer for {code}", code="anchor_toml_invalid")
+        if asset_issuer and asset_issuer != issuer:
+            raise ValidationError(
+                f"{code} issuer does not match the anchor's issuer",
+                code="asset_issuer_mismatch",
+                details={"expected": issuer, "got": asset_issuer},
+            )
+    info = await client.info(lang=lang)
+    return ResolvedAnchorAsset(
+        code=code,
+        issuer=issuer,
+        deposit=_limits(info.get("deposit", {}).get(code)),
+        withdraw=_limits(info.get("withdraw", {}).get(code)),
+        features=dict(info.get("features") or {}),
+    )
+
+
+def _check_limits(kind: AnchorTxKind, asset: ResolvedAnchorAsset, amount: Decimal | None) -> None:
+    block = asset.deposit if kind is AnchorTxKind.deposit else asset.withdraw
+    what = "deposit" if kind is AnchorTxKind.deposit else "withdraw"
+    if not block["enabled"]:
+        raise StateError(
+            f"{what} of {display_code(asset.code)} is disabled by the anchor", code="anchor_asset_disabled",
+            details={"asset_code": asset.code, "kind": what},
+        )
+    if amount is None:
+        return
+    lo, hi = block["min"], block["max"]
+    if lo is not None and amount < lo:
+        raise ValidationError(
+            f"amount below the anchor minimum ({lo})", code="amount_too_small", details={"min": str(lo), "max": str(hi) if hi else None}
+        )
+    if hi is not None and amount > hi:
+        raise ValidationError(
+            f"amount above the anchor maximum ({hi})", code="amount_too_large", details={"min": str(lo) if lo else None, "max": str(hi)}
+        )
+
+
+# --- deposit / withdraw ------------------------------------------------------------------------------------------
+
+
+def _sep6_type(info: dict[str, Any], kind: AnchorTxKind, asset_code: str) -> str | None:
+    """The funding method SEP-6 wants in ``type``.
+
+    ``/info`` lists what the anchor accepts (``funding_methods``, or the legacy ``types`` map on
+    withdraw). We take the single supported one; with several, the first is the sane default and the
+    caller can override it later. Absent means the anchor does not ask for one.
+    """
+    block = info.get("deposit" if kind is AnchorTxKind.deposit else "withdraw")
+    entry = block.get(normalize_asset_code(asset_code)) if isinstance(block, dict) else None
+    if not isinstance(entry, dict):
+        return None
+    methods = entry.get("funding_methods")
+    if isinstance(methods, list) and methods:
+        return str(methods[0])
+    types = entry.get("types")
+    if isinstance(types, dict) and types:
+        return str(next(iter(types)))
+    return None
+
+
+def _sep6_instructions(raw: dict[str, Any]) -> list[dict[str, str]]:
+    """SEP-6 ``instructions`` map -> an ordered list the app can render as rows."""
+    out: list[dict[str, str]] = []
+    block = raw.get("instructions")
+    if isinstance(block, dict):
+        for name, field in block.items():
+            if isinstance(field, dict):
+                out.append(
+                    {
+                        "name": str(name),
+                        "value": str(field.get("value", "")),
+                        "description": str(field.get("description", "")),
+                    }
+                )
+    return out
+
+
+async def start_interactive(
+    db: AsyncSession,
+    settings: Settings,
+    client: AnchorClient,
+    horizon: Any,
+    user: User,
+    *,
+    kind: AnchorTxKind,
+    asset_code: str,
+    asset_issuer: str | None,
+    amount: Decimal | None,
+    lang: str | None,
+    callback: str | None,
+    claimable_balance_supported: bool = False,
+    skip_trustline_check: bool = False,
+) -> AnchorTransaction:
+    """DESIGN §3.1 steps 3/4: pre-validate against ``/info``, make sure the account can receive the asset,
+    call the anchor with the user's JWT and store the ``anchor_transactions`` row (status incomplete)."""
+    client._ensure_enabled()
+    check_rate_limit(str(user.id), f"anchor_{kind.value}", limit=10)
+    if not is_g_account(user.stellar_address):
+        raise ValidationError("anchor flows need a G... account", code="anchor_requires_g_account")
+    asset = await resolve_anchor_asset(settings, client, asset_code, asset_issuer, lang=lang)
+    _check_limits(kind, asset, amount)
+    session, token = await require_token(db, settings, user, client.domain)
+
+    account_info = None
+    if horizon is not None:
+        account_info = await horizon.get_account(user.stellar_address)
+        if account_info is None:
+            raise StateError(
+                "the wallet account does not exist on the ledger yet; fund it first (friendbot on testnet)",
+                code="account_not_funded",
+                details={"account": user.stellar_address, "friendbot_url": settings.effective_friendbot_url},
+            )
+    supports_cb = bool(asset.features.get("claimable_balances")) and claimable_balance_supported
+    if kind is AnchorTxKind.deposit and asset.code != NATIVE and account_info is not None and not skip_trustline_check:
+        from app.services.stellar.types import AssetRef
+
+        if not account_info.has_trustline(AssetRef(asset.code, asset.issuer)) and not supports_cb:
+            raise StateError(
+                f"add a trustline for {asset.code} before depositing (POST /wallet/tx/trustline)",
+                code="trustline_required",
+                details={"asset_code": asset.code, "issuer": asset.issuer},
+            )
+    if kind is AnchorTxKind.withdraw and account_info is not None and amount is not None:
+        from app.services.stellar.types import AssetRef
+
+        ref = AssetRef.native() if asset.code == NATIVE else AssetRef(asset.code, asset.issuer)
+        bal = account_info.balance_of(ref)
+        available = bal.available if bal is not None else Decimal("0")
+        if available < amount:
+            raise InsufficientFundsError(
+                f"wallet holds {available} {display_code(asset.code)}, {amount} requested",
+                code="insufficient_funds",
+                details={"available": str(available), "requested": str(amount)},
+            )
+
+    protocol = await client.protocol()
+    try:
+        if protocol == "sep6":
+            # SEP-6: no web page. The anchor answers with the off-chain leg itself — where to send the
+            # fiat (deposit) or which account and memo to pay (withdraw) — so the row is complete here.
+            type_ = _sep6_type(await client.info(lang=lang), kind, asset.code)
+            if kind is AnchorTxKind.deposit:
+                body = await client.deposit_sep6(
+                    token, account=user.stellar_address, asset_code=asset.code, amount=amount, type_=type_, lang=lang
+                )
+            else:
+                body = await client.withdraw_sep6(
+                    token, account=user.stellar_address, asset_code=asset.code, amount=amount, type_=type_, lang=lang
+                )
+        elif kind is AnchorTxKind.deposit:
+            body = await client.deposit_interactive(
+                token, account=user.stellar_address, asset_code=asset.code, asset_issuer=asset.issuer, amount=amount,
+                lang=lang, claimable_balance_supported=supports_cb,
+            )
+        else:
+            body = await client.withdraw_interactive(
+                token, account=user.stellar_address, asset_code=asset.code, asset_issuer=asset.issuer, amount=amount, lang=lang
+            )
+    except AnchorAuthRequiredError:
+        await _auth_failed(db, user, client.domain)
+        raise
+
+    url: str | None = None
+    if protocol == "sep24":
+        url = str(body["url"])
+        if callback == "postMessage":
+            url = with_query(url, callback="postMessage")
+    tx = AnchorTransaction(
+        user_id=user.id,
+        anchor_domain=client.domain,
+        anchor_tx_id=str(body["id"]),
+        kind=kind,
+        asset_code=asset.code,
+        asset_issuer=asset.issuer,
+        amount_in=amount,
+        status=AnchorTxStatus.incomplete.value,
+        interactive_url=url,
+        raw={"interactive": body} if protocol == "sep24" else {"sep6": body},
+    )
+    if protocol == "sep6":
+        # The anchor is now waiting on the human: fiat into its bank, or USDC into its account.
+        tx.status = AnchorTxStatus.pending_user_transfer_start.value
+        if kind is AnchorTxKind.withdraw:
+            tx.withdraw_anchor_account = str(body["account_id"])
+            memo = body.get("memo")
+            tx.withdraw_memo = str(memo) if memo is not None else None
+            tx.withdraw_memo_type = str(body.get("memo_type") or "text") if memo is not None else None
+    db.add(tx)
+    await db.flush()
+    log.info("anchor %s started user=%s anchor_tx=%s asset=%s", kind.value, user.id, tx.anchor_tx_id, asset.code)
+    return tx
+
+
+def interactive_out(tx: AnchorTransaction) -> InteractiveOut:
+    action = action_for(tx.status, tx.kind)
+    sep6 = (tx.raw or {}).get("sep6") if isinstance(tx.raw, dict) else None
+    sep6 = sep6 if isinstance(sep6, dict) else None
+    extra = sep6.get("extra_info") if sep6 and isinstance(sep6.get("extra_info"), dict) else {}
+    return InteractiveOut(
+        id=tx.id,
+        anchor_tx_id=tx.anchor_tx_id,
+        kind=tx.kind,
+        status=tx.status,
+        type="bank_transfer_instructions" if sep6 else "interactive_customer_info_needed",
+        interactive_url=tx.interactive_url or None,
+        asset_code=tx.asset_code,
+        asset_issuer=tx.asset_issuer,
+        amount=tx.amount_in,
+        action=action,
+        action_label=action_label(action),
+        how=str(sep6.get("how")) if sep6 and sep6.get("how") else None,
+        instructions=_sep6_instructions(sep6) if sep6 else [],
+        deposit_account=tx.withdraw_anchor_account,
+        memo=tx.withdraw_memo,
+        memo_type=tx.withdraw_memo_type,
+        eta_seconds=int(sep6["eta"]) if sep6 and isinstance(sep6.get("eta"), int | float) else None,
+        fee_percent=Decimal(str(sep6["fee_percent"])) if sep6 and sep6.get("fee_percent") is not None else None,
+        note=str(extra.get("message")) if extra.get("message") else None,
+    )
+
+
+# --- status mirroring ------------------------------------------------------------------------------------------------
+
+_KIND_FROM_ANCHOR = {"deposit": AnchorTxKind.deposit, "withdrawal": AnchorTxKind.withdraw, "withdraw": AnchorTxKind.withdraw}
+
+
+def apply_transaction_json(tx: AnchorTransaction, data: dict[str, Any], *, now: datetime | None = None) -> tuple[str, str] | None:
+    """Mirror one SEP-24 transaction object onto the row. Returns (old, new) when the status changed."""
+    now = now or now_utc()
+    old = tx.status
+    new = str(data.get("status") or old)
+    tx.status = new
+    if (fee := data.get("fee_details")) and isinstance(fee, dict) and fee.get("total") is not None:
+        tx.amount_fee = _decimal(fee.get("total"))
+    elif data.get("amount_fee") is not None:
+        tx.amount_fee = _decimal(data.get("amount_fee"))
+    if data.get("amount_in") is not None:
+        tx.amount_in = _decimal(data.get("amount_in")) or tx.amount_in
+    if data.get("amount_out") is not None:
+        tx.amount_out = _decimal(data.get("amount_out"))
+    for src, dst in (
+        ("more_info_url", "more_info_url"),
+        ("withdraw_anchor_account", "withdraw_anchor_account"),
+        ("withdraw_memo", "withdraw_memo"),
+        ("withdraw_memo_type", "withdraw_memo_type"),
+        ("stellar_transaction_id", "stellar_tx_hash"),
+        ("external_transaction_id", "external_tx_id"),
+        ("message", "message"),
+    ):
+        val = data.get(src)
+        if val is not None:
+            setattr(tx, dst, str(val))
+    if data.get("withdraw_memo") is not None and data.get("withdraw_memo_type") is None:
+        tx.withdraw_memo_type = tx.withdraw_memo_type or "text"
+    started = _parse_dt(data.get("started_at"))
+    completed = _parse_dt(data.get("completed_at"))
+    if started is not None:
+        tx.started_at = started
+    if completed is not None:
+        tx.completed_at = completed
+    if data.get("kind") in _KIND_FROM_ANCHOR:
+        tx.kind = _KIND_FROM_ANCHOR[str(data["kind"])]
+    tx.raw = dict(data)
+    touch(tx, now)
+    if new != old:
+        if old == AnchorTxStatus.incomplete.value and tx.started_at is None:
+            tx.started_at = now
+        if new == AnchorTxStatus.completed.value and tx.completed_at is None:
+            tx.completed_at = now
+        return old, new
+    return None
+
+
+def touch(tx: AnchorTransaction, now: datetime | None = None) -> None:
+    """Set `updated_at` explicitly so the ORM does not expire it after the flush (async-safe serialisation)."""
+    tx.updated_at = now or now_utc()
+
+
+def _tx_title(tx: AnchorTransaction) -> str:
+    what = "Deposit" if tx.kind is AnchorTxKind.deposit else "Withdrawal"
+    amount = tx.amount_out if tx.kind is AnchorTxKind.deposit else tx.amount_in
+    amt = f" {format(amount, 'f')} {display_code(tx.asset_code)}" if amount is not None else ""
+    return f"{what}{amt}"
+
+
+async def notify_transition(db: AsyncSession, tx: AnchorTransaction, old: str, new: str) -> None:
+    """Push for the states the user has to know about; the rest are visible in the list."""
+    what = "Deposit" if tx.kind is AnchorTxKind.deposit else "Withdrawal"
+    label = status_label(new)
+    action = action_for(new, tx.kind)
+    if new == AnchorTxStatus.completed.value:
+        title, body = f"{what} completed", f"{_tx_title(tx)} is in your account."
+    elif new == AnchorTxStatus.pending_user_transfer_start.value:
+        title, body = "Payment needed", f"{_tx_title(tx)}: sign the payment to the anchor's account."
+    elif new == AnchorTxStatus.pending_trust.value:
+        title, body = (
+            "Trustline needed",
+            f"Add a trustline for {display_code(tx.asset_code)}; the deposit completes after that.",
+        )
+    elif new == AnchorTxStatus.pending_user.value:
+        title, body = f"{what}: the anchor needs something from you", tx.message or "Open the anchor page again."
+    elif new == AnchorTxStatus.on_hold.value:
+        title, body = f"{what} under review", tx.message or "The anchor is running extra checks."
+    elif new == AnchorTxStatus.refunded.value:
+        title, body = f"{what} refunded", tx.message or f"{_tx_title(tx)} was refunded."
+    elif is_terminal(new):
+        title, body = f"{what} failed", tx.message or f"{_tx_title(tx)}: {label}."
+    else:
+        return  # intermediate anchor-side states are visible in the list, no push for them
+    await notify(
+        db,
+        tx.user_id,
+        f"anchor_{tx.kind.value}_{new}",
+        title,
+        body,
+        {
+            "anchor_transaction_id": str(tx.id),
+            "anchor_tx_id": tx.anchor_tx_id,
+            "kind": tx.kind.value,
+            "status": new,
+            "previous_status": old,
+            "action": action,
+            "asset_code": tx.asset_code,
+        },
+        category=NotificationCategory.wallet,
+    )
+
+
+async def refresh_transaction(db: AsyncSession, client: AnchorClient, token: str, tx: AnchorTransaction) -> bool:
+    """Poll one transaction and mirror it (+ notification on a status change). Flush only."""
+    data = await client.get_transaction(token, tx.anchor_tx_id)
+    change = apply_transaction_json(tx, data)
+    if change is not None:
+        old, new = change
+        log.info("anchor tx %s %s -> %s", tx.anchor_tx_id, old, new)
+        await notify_transition(db, tx, old, new)
+    await db.flush()
+    return change is not None
+
+
+async def _user_transactions(
+    db: AsyncSession, user: User, domain: str, *, kind: AnchorTxKind | None = None, status: str | None = None, asset_code: str | None = None
+) -> list[AnchorTransaction]:
+    q = select(AnchorTransaction).where(AnchorTransaction.user_id == user.id, AnchorTransaction.anchor_domain == domain)
+    if kind is not None:
+        q = q.where(AnchorTransaction.kind == kind)
+    if status:
+        q = q.where(AnchorTransaction.status == status)
+    if asset_code:
+        q = q.where(AnchorTransaction.asset_code == normalize_asset_code(asset_code))
+    q = q.order_by(AnchorTransaction.created_at.desc(), AnchorTransaction.id.desc())
+    return list((await db.execute(q)).scalars().all())
+
+
+@dataclass
+class SyncResult:
+    synced: bool
+    checked: int = 0
+    updated: int = 0
+    discovered: int = 0
+    auth_required: bool = False
+    error: str | None = None
+
+
+async def sync_user_transactions(
+    db: AsyncSession, settings: Settings, client: AnchorClient, user: User, *, asset_code: str | None = None, discover: bool = True
+) -> SyncResult:
+    """Refresh every non-terminal anchor transaction of the user (``GET /transaction?id=``) and, with
+    `discover`, pull ``GET /transactions?asset_code=`` per offered asset to pick up transactions started
+    elsewhere. Never raises for anchor problems: the caller lists from the DB and reports `synced=false`."""
+    if not settings.anchor_enabled:
+        return SyncResult(synced=False, error="anchor_disabled")
+    try:
+        _, token = await require_token(db, settings, user, client.domain)
+    except AnchorAuthRequiredError as e:
+        return SyncResult(synced=False, auth_required=True, error=e.message)
+    result = SyncResult(synced=True)
+    rows = await _user_transactions(db, user, client.domain, asset_code=asset_code)
+    by_anchor_id = {r.anchor_tx_id: r for r in rows}
+    try:
+        for tx in rows:
+            if tx.is_terminal:
+                continue
+            result.checked += 1
+            if await refresh_transaction(db, client, token, tx):
+                result.updated += 1
+        if discover:
+            codes = [normalize_asset_code(asset_code)] if asset_code else offered_codes(settings)
+            for code in codes:
+                for data in await client.list_transactions(token, code, limit=50):
+                    anchor_id = str(data["id"])
+                    if anchor_id in by_anchor_id:
+                        continue
+                    kind = _KIND_FROM_ANCHOR.get(str(data.get("kind") or ""), None)
+                    if kind is None:
+                        continue
+                    disc = await client.discover()
+                    cur = disc.currency(code)
+                    tx = AnchorTransaction(
+                        user_id=user.id, anchor_domain=client.domain, anchor_tx_id=anchor_id, kind=kind, asset_code=code,
+                        asset_issuer=cur.issuer if cur else None, status=AnchorTxStatus.incomplete.value, raw={},
+                    )
+                    db.add(tx)
+                    apply_transaction_json(tx, data)
+                    by_anchor_id[anchor_id] = tx
+                    result.discovered += 1
+            await db.flush()
+    except AnchorAuthRequiredError as e:
+        await _auth_failed(db, user, client.domain)
+        result.synced, result.auth_required, result.error = False, True, e.message
+    except AnchorError as e:
+        log.warning("anchor sync failed for user %s: %s", user.id, e.message)
+        result.synced, result.error = False, e.message
+    return result
+
+
+async def list_user_transactions(
+    db: AsyncSession,
+    settings: Settings,
+    client: AnchorClient,
+    user: User,
+    *,
+    kind: AnchorTxKind | None = None,
+    status: str | None = None,
+    asset_code: str | None = None,
+    sync: bool = True,
+) -> tuple[list[AnchorTransaction], SyncResult]:
+    result = await sync_user_transactions(db, settings, client, user, asset_code=asset_code) if sync else SyncResult(synced=False)
+    rows = await _user_transactions(db, user, client.domain, kind=kind, status=status, asset_code=asset_code)
+    return rows, result
+
+
+async def get_user_transaction(db: AsyncSession, user: User, ref: str, domain: str | None = None) -> AnchorTransaction:
+    """By our uuid or by the anchor's transaction id; must belong to the caller."""
+    tx: AnchorTransaction | None = None
+    try:
+        tx = await db.get(AnchorTransaction, uuid.UUID(str(ref)))
+    except ValueError:
+        q = select(AnchorTransaction).where(AnchorTransaction.anchor_tx_id == ref, AnchorTransaction.user_id == user.id)
+        if domain:
+            q = q.where(AnchorTransaction.anchor_domain == domain)
+        tx = (await db.execute(q)).scalars().first()
+    if tx is None:
+        raise NotFoundError("Anchor transaction not found", code="anchor_tx_not_found")
+    if tx.user_id != user.id and not user.is_admin:
+        raise ForbiddenError("This anchor transaction belongs to another user", code="not_owner")
+    return tx
+
+
+async def refresh_user_transaction(
+    db: AsyncSession, settings: Settings, client: AnchorClient, user: User, tx: AnchorTransaction
+) -> SyncResult:
+    if tx.is_terminal or not settings.anchor_enabled:
+        return SyncResult(synced=False)
+    try:
+        _, token = await require_token(db, settings, user, client.domain)
+        updated = await refresh_transaction(db, client, token, tx)
+        return SyncResult(synced=True, checked=1, updated=int(updated))
+    except AnchorAuthRequiredError as e:
+        await _auth_failed(db, user, client.domain)
+        return SyncResult(synced=False, auth_required=True, error=e.message)
+    except AnchorError as e:
+        return SyncResult(synced=False, error=e.message)
+
+
+def transaction_out(tx: AnchorTransaction) -> AnchorTransactionOut:
+    action = action_for(tx.status, tx.kind)
+    raw = tx.raw if isinstance(tx.raw, dict) else {}
+    return AnchorTransactionOut(
+        id=tx.id,
+        anchor_domain=tx.anchor_domain,
+        anchor_tx_id=tx.anchor_tx_id,
+        kind=tx.kind,
+        asset_code=tx.asset_code,
+        asset_issuer=tx.asset_issuer,
+        amount_in=tx.amount_in,
+        amount_out=tx.amount_out,
+        amount_fee=tx.amount_fee,
+        status=tx.status,
+        status_label=status_label(tx.status),
+        is_terminal=tx.is_terminal,
+        action=action,
+        action_label=action_label(action),
+        needs_reauth=bool(raw.get("needs_reauth")),
+        interactive_url=tx.interactive_url,
+        more_info_url=tx.more_info_url,
+        withdraw_anchor_account=tx.withdraw_anchor_account,
+        withdraw_memo=tx.withdraw_memo,
+        withdraw_memo_type=tx.withdraw_memo_type,
+        stellar_tx_hash=tx.stellar_tx_hash,
+        external_tx_id=tx.external_tx_id,
+        message=tx.message,
+        started_at=tx.started_at,
+        completed_at=tx.completed_at,
+        created_at=tx.created_at,
+        updated_at=tx.updated_at,
+    )
+
+
+# --- withdraw leg: the user pays the anchor ----------------------------------------------------------------------------
+
+
+async def build_withdraw_payment(
+    db: AsyncSession, settings: Settings, soroban: Any, user: User, tx: AnchorTransaction
+) -> tuple[PendingTransaction, UnsignedTx]:
+    """§3.1 step 4: unsigned classic payment from the user to ``withdraw_anchor_account`` with EXACTLY the
+    anchor's ``withdraw_memo`` / ``withdraw_memo_type`` and ``amount_in`` (gotcha #4). Signed by the mobile,
+    submitted through ``POST /tx/submit``."""
+    if tx.kind is not AnchorTxKind.withdraw:
+        raise StateError("only withdrawals need a payment", code="not_a_withdrawal")
+    if tx.status != AnchorTxStatus.pending_user_transfer_start.value:
+        raise StateError(
+            f"withdrawal is {tx.status}; the anchor is not waiting for a payment",
+            code="withdraw_not_ready",
+            details={"status": tx.status, "action": action_for(tx.status, tx.kind)},
+        )
+    if not tx.withdraw_anchor_account or tx.amount_in is None or tx.amount_in <= 0:
+        raise StateError(
+            "anchor has not provided withdraw_anchor_account / amount_in yet; refresh the transaction",
+            code="withdraw_details_missing",
+        )
+    if tx.asset_code != NATIVE and not tx.asset_issuer:
+        raise StateError("withdrawal asset has no issuer on record", code="withdraw_details_missing")
+    memo = tx.withdraw_memo
+    memo_type = tx.withdraw_memo_type if memo else None
+    unsigned: UnsignedTx = await soroban.build_payment(
+        user.stellar_address,
+        tx.withdraw_anchor_account,
+        classic_code(tx.asset_code),
+        tx.asset_issuer,
+        tx.amount_in,
+        memo=memo,
+        memo_type=memo_type,
+    )
+    pending = await record_pending(
+        db,
+        user,
+        PendingTxKind.payment,
+        None,
+        unsigned,
+        payload={
+            "purpose": "anchor_withdraw",
+            "anchor_domain": tx.anchor_domain,
+            "anchor_tx_id": tx.anchor_tx_id,
+            "anchor_transaction_id": str(tx.id),
+            "withdraw_memo": memo,
+            "withdraw_memo_type": memo_type,
+        },
+    )
+    raw = dict(tx.raw or {})
+    raw["payment_pending_tx_id"] = str(pending.id)
+    raw["payment_tx_hash"] = unsigned.hash
+    tx.raw = raw
+    touch(tx)
+    await db.flush()
+    return pending, unsigned
+
+
+# --- SEP-12 pass-through ------------------------------------------------------------------------------------------------
+
+
+async def kyc(db: AsyncSession, settings: Settings, client: AnchorClient, user: User, body: KycIn) -> KycOut:
+    """``PUT {KYC_SERVER}/customer`` with the SEP-9 fields, then ``GET`` the status. Only the customer id
+    is returned; no PII is stored on our side."""
+    client._ensure_enabled()
+    check_rate_limit(str(user.id), "anchor_kyc", limit=10)
+    _, token = await require_token(db, settings, user, client.domain)
+    try:
+        put = await client.kyc_put(token, body.fields, customer_id=body.customer_id, type_=body.type)
+        customer_id = str(put.get("id")) if put.get("id") else body.customer_id
+        status: dict[str, Any] = {}
+        try:
+            status = await client.kyc_get(token, customer_id=customer_id, type_=body.type)
+        except AnchorError as e:  # status is a nicety; the PUT is what matters
+            log.info("kyc status unavailable: %s", e.message)
+    except AnchorAuthRequiredError:
+        await _auth_failed(db, user, client.domain)
+        raise
+    return KycOut(
+        customer_id=str(status.get("id") or customer_id) if (status.get("id") or customer_id) else None,
+        status=status.get("status"),
+        fields=status.get("fields") if isinstance(status.get("fields"), dict) else None,
+        provided_fields=status.get("provided_fields") if isinstance(status.get("provided_fields"), dict) else None,
+        message=status.get("message"),
+    )
+
+
+__all__ = [
+    "AnchorAuthRequiredError",
+    "AnchorClient",
+    "AnchorCurrency",
+    "AnchorDisabledError",
+    "AnchorDiscovery",
+    "AnchorError",
+    "AnchorRateLimitedError",
+    "ChallengeResult",
+    "ResolvedAnchorAsset",
+    "SyncResult",
+    "TokenResult",
+    "action_for",
+    "action_label",
+    "anchor_assets",
+    "anchor_info",
+    "apply_transaction_json",
+    "build_withdraw_payment",
+    "challenge_for_user",
+    "check_rate_limit",
+    "classic_code",
+    "decode_anchor_jwt",
+    "display_code",
+    "drop_session",
+    "exchange_token",
+    "get_anchor_client",
+    "get_session",
+    "get_user_transaction",
+    "interactive_out",
+    "is_terminal",
+    "kyc",
+    "list_user_transactions",
+    "normalize_asset_code",
+    "notify_transition",
+    "offered_codes",
+    "parse_toml",
+    "refresh_transaction",
+    "refresh_user_transaction",
+    "require_token",
+    "reset_cache",
+    "reset_rate_limits",
+    "resolve_anchor_asset",
+    "session_out",
+    "session_token",
+    "set_anchor_client",
+    "start_interactive",
+    "status_label",
+    "store_session",
+    "sync_user_transactions",
+    "touch",
+    "transaction_out",
+    "verify_challenge",
+    "with_query",
+]

@@ -1,0 +1,996 @@
+"""SCVal (de)serialisation for the ``elevator_vault`` contract ABI.
+
+Mirrors ``contracts/vault/src/{types,errors,events}.rs`` exactly (soroban-sdk 28):
+
+* ``#[contracttype] struct`` -> ``SCV_MAP`` keyed by field-name symbols (sorted), nested structs inline;
+* ``#[contracttype] #[repr(u32)] enum Status { Proposed = 0, .. }`` -> ``SCV_U32`` (integer enum);
+* ``i128`` amounts, ``u64`` ids/timestamps, ``u32`` bps, ``BytesN<32>`` -> ``SCV_BYTES``, ``Vec<Address>``;
+* ``#[contractevent]`` -> topics ``[snake_case(name), #[topic] fields in order]`` and a data map of the
+  remaining fields (sparse map, keys sorted) - the sdk's default ``data_format = "map"``;
+* ``#[contracterror]`` codes are the public ABI (never renumbered).
+
+Everything here is pure: no network, no settings.
+"""
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass, fields
+from enum import IntEnum
+from typing import Any, ClassVar
+
+from stellar_sdk import scval
+from stellar_sdk import xdr as sx
+
+from app.core.errors import StellarError
+
+# --- constants (types.rs) --------------------------------------------------------------------
+
+MAX_TOKENS = 6
+MIN_DURATION = 86_400
+MAX_DURATION = 3 * 365 * 86_400
+MAX_COMMISSION_BPS = 5_000
+MAX_PLATFORM_FEE_BPS = 1_000
+MIN_DRAWDOWN_BPS = 100
+MAX_SETTLE_SLIPPAGE_BPS = 5_000
+BPS_DENOM = 10_000
+LISTING_REF_LEN = 32
+
+
+class Fn:
+    """Contract function names (lib.rs)."""
+
+    CONSTRUCTOR = "__constructor"
+    SET_TOKEN = "set_token"
+    SET_ROUTER = "set_router"
+    SET_FEES = "set_fees"
+    SET_PAUSED = "set_paused"
+    SET_SETTLE_SLIPPAGE = "set_settle_slippage"
+    UPGRADE = "upgrade"
+    PROPOSE = "propose"
+    OPEN = "open"
+    FUND = "fund"
+    ACCEPT = "accept"
+    RESERVE = "reserve"
+    RELEASE = "release"
+    OPEN_RESERVED = "open_reserved"
+    FUND_RESERVED = "fund_reserved"
+    GET_RESERVATION = "get_reservation"
+    NEXT_RESERVATION_ID = "next_reservation_id"
+    CANCEL = "cancel"
+    TRADE = "trade"
+    SETTLE = "settle"
+    GET_AGREEMENT = "get_agreement"
+    GET_BALANCES = "get_balances"
+    VALUE_IN_BASE = "value_in_base"
+    GET_CONFIG = "get_config"
+    IS_TOKEN_ALLOWED = "is_token_allowed"
+    NEXT_ID = "next_id"
+
+
+class RouterFn:
+    """Soroswap router subset used by the vault (router.rs)."""
+
+    SWAP_EXACT_TOKENS_FOR_TOKENS = "swap_exact_tokens_for_tokens"
+    GET_AMOUNTS_OUT = "router_get_amounts_out"
+    PAIR_FOR = "router_pair_for"
+
+
+# --- errors (errors.rs) ----------------------------------------------------------------------
+
+
+class VaultError(IntEnum):
+    """``#[contracterror] Error`` - member names are the Rust variant names."""
+
+    NotInitialized = 1
+    Unauthorized = 2
+    Paused = 3
+    InvalidTerms = 4
+    TokenNotAllowed = 5
+    NotFound = 6
+    WrongStatus = 7
+    Expired = 8
+    NotExpired = 9
+    InsufficientBalance = 10
+    TooManyTokens = 11
+    DrawdownBreached = 12
+    SlippageExceeded = 13
+    Overflow = 14
+    InvalidAmount = 15
+    RouterError = 16
+    NotParty = 17
+    ReservationNotFound = 18
+    ReservationClosed = 19
+    ReservationInsufficient = 20
+    ReservationMismatch = 21
+
+    @classmethod
+    def from_code(cls, code: int | None) -> VaultError | None:
+        try:
+            return cls(int(code)) if code is not None else None
+        except ValueError:
+            return None
+
+
+ERROR_MESSAGES: dict[VaultError, str] = {
+    VaultError.NotInitialized: "contract is not initialised",
+    VaultError.Unauthorized: "caller does not match the party in the terms",
+    VaultError.Paused: "contract is paused; new agreements and trades are blocked",
+    VaultError.InvalidTerms: "terms are outside the allowed ranges",
+    VaultError.TokenNotAllowed: "token is not allow-listed (or not as a base token)",
+    VaultError.NotFound: "agreement not found on-chain",
+    VaultError.WrongStatus: "agreement is not in the status this action requires",
+    VaultError.Expired: "agreement or trade deadline has expired",
+    VaultError.NotExpired: "only the parties may settle before the end time",
+    VaultError.InsufficientBalance: "agreement holds less of token_in than amount_in",
+    VaultError.TooManyTokens: "agreement already holds the maximum number of tokens",
+    VaultError.DrawdownBreached: "trade would breach the agreement's max drawdown",
+    VaultError.SlippageExceeded: "router delivered less than min_out",
+    VaultError.Overflow: "arithmetic overflow",
+    VaultError.InvalidAmount: "amount must be positive / min_outs malformed",
+    VaultError.RouterError: "router call failed (no pair / swap failed)",
+    VaultError.NotParty: "caller is not allowed to perform this action",
+    VaultError.ReservationNotFound: "reservation not found on-chain",
+    VaultError.ReservationClosed: "reservation is already released or fully used",
+    VaultError.ReservationInsufficient: "reservation does not hold that much",
+    VaultError.ReservationMismatch: "reservation belongs to another customer or holds another token",
+}
+
+_CONTRACT_ERROR_RE = re.compile(r"Error\(Contract,\s*#(\d+)\)")
+
+
+class VaultContractError(StellarError):
+    """A vault ``#[contracterror]`` surfaced by simulation or by a failed transaction.
+
+    409 because it is a business-rule rejection (wrong status, drawdown, ...), not a gateway fault.
+    """
+
+    status_code = 409
+    code = "contract_error"
+
+    def __init__(self, code: int, *, context: str = "", details: dict[str, Any] | None = None):
+        err = VaultError.from_code(code)
+        name = err.name if err is not None else f"Unknown({code})"
+        msg = ERROR_MESSAGES.get(err, "contract call failed") if err is not None else "contract call failed"
+        prefix = f"{context}: " if context else ""
+        info: dict[str, Any] = {"contract_error": name, "contract_error_code": int(code)}
+        if details:
+            info.update(details)
+        super().__init__(f"{prefix}{name}: {msg}", details=info)
+        self.error = err
+        self.raw_code = int(code)
+
+
+def parse_contract_error(text: str | None) -> int | None:
+    """``"... Error(Contract, #7) ..."`` (simulation / diagnostic text) -> 7, else None."""
+    if not text:
+        return None
+    m = _CONTRACT_ERROR_RE.search(text)
+    return int(m.group(1)) if m else None
+
+
+def contract_error_from_scval(v: sx.SCVal) -> int | None:
+    """``SCV_ERROR`` of type ``SCE_CONTRACT`` -> its code, else None."""
+    if v.type != sx.SCValType.SCV_ERROR or v.error is None:
+        return None
+    if v.error.type != sx.SCErrorType.SCE_CONTRACT or v.error.contract_code is None:
+        return None
+    return int(v.error.contract_code.uint32)
+
+
+# --- scalar codecs ---------------------------------------------------------------------------
+
+
+def _sc(v: sx.SCVal | str | bytes) -> sx.SCVal:
+    if isinstance(v, sx.SCVal):
+        return v
+    return sx.SCVal.from_xdr(v) if isinstance(v, str) else sx.SCVal.from_xdr_bytes(v)
+
+
+def enc_address(a: str) -> sx.SCVal:
+    return scval.to_address(a)
+
+
+def dec_address(v: sx.SCVal) -> str:
+    return scval.from_address(v).address
+
+
+def enc_i128(n: int) -> sx.SCVal:
+    return scval.to_int128(int(n))
+
+
+def dec_i128(v: sx.SCVal) -> int:
+    return scval.from_int128(v)
+
+
+def enc_u64(n: int) -> sx.SCVal:
+    return scval.to_uint64(int(n))
+
+
+def dec_u64(v: sx.SCVal) -> int:
+    return scval.from_uint64(v)
+
+
+def enc_u32(n: int) -> sx.SCVal:
+    return scval.to_uint32(int(n))
+
+
+def dec_u32(v: sx.SCVal) -> int:
+    return scval.from_uint32(v)
+
+
+def enc_bool(b: bool) -> sx.SCVal:
+    return scval.to_bool(bool(b))
+
+
+def dec_bool(v: sx.SCVal) -> bool:
+    return scval.from_bool(v)
+
+
+def enc_bytes(b: bytes) -> sx.SCVal:
+    return scval.to_bytes(bytes(b))
+
+
+def dec_bytes(v: sx.SCVal) -> bytes:
+    return scval.from_bytes(v)
+
+
+def enc_symbol(s: str) -> sx.SCVal:
+    return scval.to_symbol(s)
+
+
+def dec_symbol(v: sx.SCVal) -> str:
+    return scval.from_symbol(v)
+
+
+def enc_address_vec(addrs: list[str]) -> sx.SCVal:
+    return scval.to_vec([enc_address(a) for a in addrs])
+
+
+def dec_address_vec(v: sx.SCVal) -> list[str]:
+    return [dec_address(x) for x in scval.from_vec(v)]
+
+
+def enc_i128_vec(values: list[int]) -> sx.SCVal:
+    return scval.to_vec([enc_i128(x) for x in values])
+
+
+def _struct(v: sx.SCVal | str, what: str) -> dict[str, sx.SCVal]:
+    try:
+        return scval.from_struct(_sc(v))
+    except Exception as e:  # noqa: BLE001 - any malformed SCVal
+        raise StellarError(f"cannot decode {what}: {e}", code="abi_decode_error") from e
+
+
+def _need(d: dict[str, sx.SCVal], key: str, what: str) -> sx.SCVal:
+    if key not in d:
+        raise StellarError(f"{what} is missing field '{key}'", code="abi_decode_error")
+    return d[key]
+
+
+# --- Status ----------------------------------------------------------------------------------
+
+
+class Status(IntEnum):
+    """``enum Status`` (integer enum -> SCV_U32)."""
+
+    Proposed = 0
+    Funded = 1
+    Active = 2
+    Settled = 3
+    Cancelled = 4
+
+    @property
+    def label(self) -> str:
+        return self.name.lower()
+
+    def to_scval(self) -> sx.SCVal:
+        return enc_u32(int(self))
+
+    @classmethod
+    def from_scval(cls, v: sx.SCVal | str) -> Status:
+        v = _sc(v)
+        if v.type == sx.SCValType.SCV_U32:
+            return cls(dec_u32(v))
+        # Defensive: a unit-variant (symbol) encoding of the same names.
+        if v.type == sx.SCValType.SCV_VEC:
+            key, _ = scval.from_enum(v)
+            return cls[key]
+        if v.type == sx.SCValType.SCV_SYMBOL:
+            return cls[dec_symbol(v)]
+        raise StellarError(f"cannot decode Status from {v.type.name}", code="abi_decode_error")
+
+
+# --- structs ---------------------------------------------------------------------------------
+
+
+def listing_ref_from_hex(hex_str: str) -> bytes:
+    raw = bytes.fromhex(hex_str)
+    if len(raw) != LISTING_REF_LEN:
+        raise StellarError("listing_ref must be 32 bytes", code="invalid_terms")
+    return raw
+
+
+@dataclass(frozen=True)
+class Terms:
+    """``struct Terms`` - amounts in raw units (i128), duration in seconds, bps as u32."""
+
+    customer: str
+    trader: str
+    base_token: str
+    principal: int
+    duration_secs: int
+    commission_bps: int
+    max_drawdown_bps: int
+    listing_ref: bytes = b"\x00" * LISTING_REF_LEN
+
+    @property
+    def listing_ref_hex(self) -> str:
+        return self.listing_ref.hex()
+
+    def validate(self) -> None:
+        """The contract's ``validate_terms`` minus the allow-list check (needs chain state)."""
+        if self.principal <= 0:
+            raise VaultContractError(VaultError.InvalidTerms, context="principal must be > 0")
+        if not (MIN_DURATION <= self.duration_secs <= MAX_DURATION):
+            raise VaultContractError(VaultError.InvalidTerms, context="duration out of range")
+        if not (0 <= self.commission_bps <= MAX_COMMISSION_BPS):
+            raise VaultContractError(VaultError.InvalidTerms, context="commission out of range")
+        if not (MIN_DRAWDOWN_BPS <= self.max_drawdown_bps <= BPS_DENOM):
+            raise VaultContractError(VaultError.InvalidTerms, context="max drawdown out of range")
+        if self.customer == self.trader:
+            raise VaultContractError(VaultError.InvalidTerms, context="customer and trader must differ")
+        if len(self.listing_ref) != LISTING_REF_LEN:
+            raise VaultContractError(VaultError.InvalidTerms, context="listing_ref must be 32 bytes")
+
+    def to_scval(self) -> sx.SCVal:
+        if len(self.listing_ref) != LISTING_REF_LEN:
+            raise StellarError("listing_ref must be 32 bytes", code="invalid_terms")
+        return scval.to_struct(
+            {
+                "customer": enc_address(self.customer),
+                "trader": enc_address(self.trader),
+                "base_token": enc_address(self.base_token),
+                "principal": enc_i128(self.principal),
+                "duration_secs": enc_u64(self.duration_secs),
+                "commission_bps": enc_u32(self.commission_bps),
+                "max_drawdown_bps": enc_u32(self.max_drawdown_bps),
+                "listing_ref": enc_bytes(self.listing_ref),
+            }
+        )
+
+    @classmethod
+    def from_scval(cls, v: sx.SCVal | str) -> Terms:
+        d = _struct(v, "Terms")
+        return cls(
+            customer=dec_address(_need(d, "customer", "Terms")),
+            trader=dec_address(_need(d, "trader", "Terms")),
+            base_token=dec_address(_need(d, "base_token", "Terms")),
+            principal=dec_i128(_need(d, "principal", "Terms")),
+            duration_secs=dec_u64(_need(d, "duration_secs", "Terms")),
+            commission_bps=dec_u32(_need(d, "commission_bps", "Terms")),
+            max_drawdown_bps=dec_u32(_need(d, "max_drawdown_bps", "Terms")),
+            listing_ref=dec_bytes(_need(d, "listing_ref", "Terms")),
+        )
+
+    def as_dict(self) -> dict[str, Any]:
+        d = {f.name: getattr(self, f.name) for f in fields(self)}
+        d["listing_ref"] = self.listing_ref_hex
+        return d
+
+
+@dataclass(frozen=True)
+class Agreement:
+    """``struct Agreement`` as stored on-chain (the ``get_agreement`` view)."""
+
+    id: int
+    terms: Terms
+    status: Status
+    proposer: str
+    created_at: int
+    start_time: int
+    end_time: int
+    tokens: list[str]
+    settled_at: int = 0
+    final_value: int = 0
+    trader_fee: int = 0
+    platform_fee: int = 0
+    customer_payout: int = 0
+
+    @property
+    def is_active(self) -> bool:
+        return self.status is Status.Active
+
+    @property
+    def is_open(self) -> bool:
+        return self.status in (Status.Proposed, Status.Funded, Status.Active)
+
+    def to_scval(self) -> sx.SCVal:
+        return scval.to_struct(
+            {
+                "id": enc_u64(self.id),
+                "terms": self.terms.to_scval(),
+                "status": self.status.to_scval(),
+                "proposer": enc_address(self.proposer),
+                "created_at": enc_u64(self.created_at),
+                "start_time": enc_u64(self.start_time),
+                "end_time": enc_u64(self.end_time),
+                "tokens": enc_address_vec(self.tokens),
+                "settled_at": enc_u64(self.settled_at),
+                "final_value": enc_i128(self.final_value),
+                "trader_fee": enc_i128(self.trader_fee),
+                "platform_fee": enc_i128(self.platform_fee),
+                "customer_payout": enc_i128(self.customer_payout),
+            }
+        )
+
+    @classmethod
+    def from_scval(cls, v: sx.SCVal | str) -> Agreement:
+        d = _struct(v, "Agreement")
+        w = "Agreement"
+        return cls(
+            id=dec_u64(_need(d, "id", w)),
+            terms=Terms.from_scval(_need(d, "terms", w)),
+            status=Status.from_scval(_need(d, "status", w)),
+            proposer=dec_address(_need(d, "proposer", w)),
+            created_at=dec_u64(_need(d, "created_at", w)),
+            start_time=dec_u64(_need(d, "start_time", w)),
+            end_time=dec_u64(_need(d, "end_time", w)),
+            tokens=dec_address_vec(_need(d, "tokens", w)),
+            settled_at=dec_u64(_need(d, "settled_at", w)),
+            final_value=dec_i128(_need(d, "final_value", w)),
+            trader_fee=dec_i128(_need(d, "trader_fee", w)),
+            platform_fee=dec_i128(_need(d, "platform_fee", w)),
+            customer_payout=dec_i128(_need(d, "customer_payout", w)),
+        )
+
+    def as_dict(self) -> dict[str, Any]:
+        d = {f.name: getattr(self, f.name) for f in fields(self)}
+        d["terms"] = self.terms.as_dict()
+        d["status"] = self.status.label
+        d["tokens"] = list(self.tokens)
+        return d
+
+
+@dataclass(frozen=True)
+class Config:
+    """``struct Config``."""
+
+    admin: str
+    router: str
+    platform_fee_bps: int
+    fee_recipient: str
+    paused: bool
+    settle_slippage_bps: int
+
+    def to_scval(self) -> sx.SCVal:
+        return scval.to_struct(
+            {
+                "admin": enc_address(self.admin),
+                "router": enc_address(self.router),
+                "platform_fee_bps": enc_u32(self.platform_fee_bps),
+                "fee_recipient": enc_address(self.fee_recipient),
+                "paused": enc_bool(self.paused),
+                "settle_slippage_bps": enc_u32(self.settle_slippage_bps),
+            }
+        )
+
+    @classmethod
+    def from_scval(cls, v: sx.SCVal | str) -> Config:
+        d = _struct(v, "Config")
+        return cls(
+            admin=dec_address(_need(d, "admin", "Config")),
+            router=dec_address(_need(d, "router", "Config")),
+            platform_fee_bps=dec_u32(_need(d, "platform_fee_bps", "Config")),
+            fee_recipient=dec_address(_need(d, "fee_recipient", "Config")),
+            paused=dec_bool(_need(d, "paused", "Config")),
+            settle_slippage_bps=dec_u32(_need(d, "settle_slippage_bps", "Config")),
+        )
+
+    def as_dict(self) -> dict[str, Any]:
+        return {f.name: getattr(self, f.name) for f in fields(self)}
+
+
+@dataclass(frozen=True)
+class TokenInfo:
+    """``struct TokenInfo`` (the ``is_token_allowed`` view; unknown tokens are ``(False, False)``)."""
+
+    allowed: bool = False
+    is_base: bool = False
+
+    def to_scval(self) -> sx.SCVal:
+        return scval.to_struct({"allowed": enc_bool(self.allowed), "is_base": enc_bool(self.is_base)})
+
+    @classmethod
+    def from_scval(cls, v: sx.SCVal | str) -> TokenInfo:
+        d = _struct(v, "TokenInfo")
+        return cls(allowed=dec_bool(_need(d, "allowed", "TokenInfo")), is_base=dec_bool(_need(d, "is_base", "TokenInfo")))
+
+
+# --- views -----------------------------------------------------------------------------------
+
+
+def encode_balances(balances: list[tuple[str, int]]) -> sx.SCVal:
+    """``Vec<(Address, i128)>``."""
+    return scval.to_vec([scval.to_tuple_struct([enc_address(t), enc_i128(b)]) for t, b in balances])
+
+
+def decode_balances(v: sx.SCVal | str) -> list[tuple[str, int]]:
+    out: list[tuple[str, int]] = []
+    try:
+        for item in scval.from_vec(_sc(v)):
+            pair = scval.from_tuple_struct(item)
+            out.append((dec_address(pair[0]), dec_i128(pair[1])))
+    except Exception as e:  # noqa: BLE001
+        raise StellarError(f"cannot decode balances: {e}", code="abi_decode_error") from e
+    return out
+
+
+def decode_i128(v: sx.SCVal | str) -> int:
+    return dec_i128(_sc(v))
+
+
+def decode_u64(v: sx.SCVal | str) -> int:
+    return dec_u64(_sc(v))
+
+
+def decode_i128_vec(v: sx.SCVal | str) -> list[int]:
+    return [dec_i128(x) for x in scval.from_vec(_sc(v))]
+
+
+# --- function argument encoders --------------------------------------------------------------
+
+
+def args_propose(trader: str, terms: Terms) -> list[sx.SCVal]:
+    return [enc_address(trader), terms.to_scval()]
+
+
+def args_open(customer: str, terms: Terms) -> list[sx.SCVal]:
+    return [enc_address(customer), terms.to_scval()]
+
+
+def args_id(agreement_id: int) -> list[sx.SCVal]:
+    return [enc_u64(agreement_id)]
+
+
+def args_cancel(agreement_id: int, caller: str) -> list[sx.SCVal]:
+    return [enc_u64(agreement_id), enc_address(caller)]
+
+
+def args_reserve(customer: str, token: str, amount: int, listing_ref: bytes) -> list[sx.SCVal]:
+    if len(listing_ref) != LISTING_REF_LEN:
+        raise StellarError(
+            f"listing_ref must be {LISTING_REF_LEN} bytes, got {len(listing_ref)}", code="abi_encode_error"
+        )
+    return [enc_address(customer), enc_address(token), enc_i128(amount), enc_bytes(listing_ref)]
+
+
+def args_release(reservation_id: int, amount: int) -> list[sx.SCVal]:
+    """``amount <= 0`` releases everything the reservation still holds."""
+    return [enc_u64(reservation_id), enc_i128(amount)]
+
+
+def args_open_reserved(customer: str, terms: Terms, reservation_id: int) -> list[sx.SCVal]:
+    return [enc_address(customer), terms.to_scval(), enc_u64(reservation_id)]
+
+
+def args_fund_reserved(agreement_id: int, reservation_id: int) -> list[sx.SCVal]:
+    return [enc_u64(agreement_id), enc_u64(reservation_id)]
+
+
+def args_trade(
+    agreement_id: int, token_in: str, token_out: str, amount_in: int, min_out: int, deadline: int
+) -> list[sx.SCVal]:
+    return [
+        enc_u64(agreement_id),
+        enc_address(token_in),
+        enc_address(token_out),
+        enc_i128(amount_in),
+        enc_i128(min_out),
+        enc_u64(deadline),
+    ]
+
+
+def args_settle(agreement_id: int, caller: str, min_outs: list[int]) -> list[sx.SCVal]:
+    return [enc_u64(agreement_id), enc_address(caller), enc_i128_vec(min_outs)]
+
+
+def args_set_token(token: str, allowed: bool, is_base: bool) -> list[sx.SCVal]:
+    return [enc_address(token), enc_bool(allowed), enc_bool(is_base)]
+
+
+def args_set_fees(platform_fee_bps: int, fee_recipient: str) -> list[sx.SCVal]:
+    return [enc_u32(platform_fee_bps), enc_address(fee_recipient)]
+
+
+def args_set_paused(paused: bool) -> list[sx.SCVal]:
+    return [enc_bool(paused)]
+
+
+def args_router_amounts_out(amount_in: int, path: list[str]) -> list[sx.SCVal]:
+    return [enc_i128(amount_in), enc_address_vec(path)]
+
+
+def args_token_balance(holder: str) -> list[sx.SCVal]:
+    return [enc_address(holder)]
+
+
+# --- events (events.rs) ----------------------------------------------------------------------
+
+# One codec per field name; names mean the same thing in every event.
+_ADDR = ("address", enc_address, dec_address)
+_I128 = ("i128", enc_i128, dec_i128)
+_U64 = ("u64", enc_u64, dec_u64)
+_U32 = ("u32", enc_u32, dec_u32)
+_BOOL = ("bool", enc_bool, dec_bool)
+_SYM = ("symbol", enc_symbol, dec_symbol)
+_BYTES = ("bytes", enc_bytes, dec_bytes)
+
+FIELD_CODECS: dict[str, tuple[str, Any, Any]] = {
+    "id": _U64,
+    "trader": _ADDR,
+    "customer": _ADDR,
+    "base_token": _ADDR,
+    "token": _ADDR,
+    "token_in": _ADDR,
+    "token_out": _ADDR,
+    "by": _ADDR,
+    "router": _ADDR,
+    "fee_recipient": _ADDR,
+    "principal": _I128,
+    "refunded": _I128,
+    "amount_in": _I128,
+    "amount_out": _I128,
+    "value_after": _I128,
+    "final_value": _I128,
+    "profit": _I128,
+    "trader_fee": _I128,
+    "platform_fee": _I128,
+    "customer_payout": _I128,
+    "start_time": _U64,
+    "end_time": _U64,
+    "platform_fee_bps": _U32,
+    "settle_slippage_bps": _U32,
+    "paused": _BOOL,
+    "allowed": _BOOL,
+    "is_base": _BOOL,
+    "key": _SYM,
+    "wasm_hash": _BYTES,
+    "amount": _I128,
+    "remaining": _I128,
+    "original": _I128,
+    "listing_ref": _BYTES,
+    "agreement_id": _U64,
+}
+
+
+class _EventBase:
+    """Shared (de)serialisation for ``#[contractevent]`` structs."""
+
+    NAME: ClassVar[str] = ""
+    TOPIC_FIELDS: ClassVar[tuple[str, ...]] = ()
+    DATA_FIELDS: ClassVar[tuple[str, ...]] = ()
+
+    def to_scvals(self) -> tuple[list[sx.SCVal], sx.SCVal]:
+        """``(topics, data)`` exactly as the contract publishes them."""
+        topics = [enc_symbol(self.NAME)]
+        for name in self.TOPIC_FIELDS:
+            topics.append(FIELD_CODECS[name][1](getattr(self, name)))
+        data = scval.to_struct({name: FIELD_CODECS[name][1](getattr(self, name)) for name in self.DATA_FIELDS})
+        return topics, data
+
+    def to_xdr(self) -> tuple[list[str], str]:
+        topics, data = self.to_scvals()
+        return [t.to_xdr() for t in topics], data.to_xdr()
+
+    @classmethod
+    def _decode(cls, topics: list[sx.SCVal], data: sx.SCVal):
+        if len(topics) != 1 + len(cls.TOPIC_FIELDS):
+            raise StellarError(
+                f"event {cls.NAME}: expected {1 + len(cls.TOPIC_FIELDS)} topics, got {len(topics)}",
+                code="abi_decode_error",
+            )
+        kwargs: dict[str, Any] = {}
+        for name, topic in zip(cls.TOPIC_FIELDS, topics[1:], strict=True):
+            kwargs[name] = FIELD_CODECS[name][2](topic)
+        body = _struct(data, f"event {cls.NAME} data") if cls.DATA_FIELDS else {}
+        for name in cls.DATA_FIELDS:
+            kwargs[name] = FIELD_CODECS[name][2](_need(body, name, f"event {cls.NAME}"))
+        return cls(**kwargs)  # type: ignore[call-arg]
+
+    def as_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {"event": self.NAME}
+        for name in (*self.TOPIC_FIELDS, *self.DATA_FIELDS):
+            val = getattr(self, name)
+            d[name] = val.hex() if isinstance(val, bytes) else val
+        return d
+
+
+@dataclass(frozen=True)
+class ProposedEvent(_EventBase):
+    NAME: ClassVar[str] = "proposed"
+    TOPIC_FIELDS: ClassVar[tuple[str, ...]] = ("id", "trader", "customer")
+    DATA_FIELDS: ClassVar[tuple[str, ...]] = ("principal", "base_token")
+    id: int
+    trader: str
+    customer: str
+    principal: int
+    base_token: str
+
+
+@dataclass(frozen=True)
+class OpenedEvent(_EventBase):
+    NAME: ClassVar[str] = "opened"
+    TOPIC_FIELDS: ClassVar[tuple[str, ...]] = ("id", "trader", "customer")
+    DATA_FIELDS: ClassVar[tuple[str, ...]] = ("principal", "base_token")
+    id: int
+    trader: str
+    customer: str
+    principal: int
+    base_token: str
+
+
+@dataclass(frozen=True)
+class ActivatedEvent(_EventBase):
+    NAME: ClassVar[str] = "activated"
+    TOPIC_FIELDS: ClassVar[tuple[str, ...]] = ("id",)
+    DATA_FIELDS: ClassVar[tuple[str, ...]] = ("start_time", "end_time")
+    id: int
+    start_time: int
+    end_time: int
+
+
+@dataclass(frozen=True)
+class CancelledEvent(_EventBase):
+    NAME: ClassVar[str] = "cancelled"
+    TOPIC_FIELDS: ClassVar[tuple[str, ...]] = ("id",)
+    DATA_FIELDS: ClassVar[tuple[str, ...]] = ("refunded",)
+    id: int
+    refunded: int
+
+
+@dataclass(frozen=True)
+class TradedEvent(_EventBase):
+    NAME: ClassVar[str] = "traded"
+    TOPIC_FIELDS: ClassVar[tuple[str, ...]] = ("id", "trader")
+    DATA_FIELDS: ClassVar[tuple[str, ...]] = ("token_in", "token_out", "amount_in", "amount_out", "value_after")
+    id: int
+    trader: str
+    token_in: str
+    token_out: str
+    amount_in: int
+    amount_out: int
+    value_after: int
+
+
+@dataclass(frozen=True)
+class SettledEvent(_EventBase):
+    NAME: ClassVar[str] = "settled"
+    TOPIC_FIELDS: ClassVar[tuple[str, ...]] = ("id",)
+    DATA_FIELDS: ClassVar[tuple[str, ...]] = (
+        "final_value",
+        "profit",
+        "trader_fee",
+        "platform_fee",
+        "customer_payout",
+        "by",
+    )
+    id: int
+    final_value: int
+    profit: int
+    trader_fee: int
+    platform_fee: int
+    customer_payout: int
+    by: str
+
+
+@dataclass(frozen=True)
+class ConfigChangedEvent(_EventBase):
+    NAME: ClassVar[str] = "config_changed"
+    TOPIC_FIELDS: ClassVar[tuple[str, ...]] = ("key",)
+    DATA_FIELDS: ClassVar[tuple[str, ...]] = (
+        "router",
+        "platform_fee_bps",
+        "fee_recipient",
+        "paused",
+        "settle_slippage_bps",
+    )
+    key: str  # "router" | "fees" | "paused" | "slippage"
+    router: str
+    platform_fee_bps: int
+    fee_recipient: str
+    paused: bool
+    settle_slippage_bps: int
+
+
+@dataclass(frozen=True)
+class TokenSetEvent(_EventBase):
+    NAME: ClassVar[str] = "token_set"
+    TOPIC_FIELDS: ClassVar[tuple[str, ...]] = ("token",)
+    DATA_FIELDS: ClassVar[tuple[str, ...]] = ("allowed", "is_base")
+    token: str
+    allowed: bool
+    is_base: bool
+
+
+@dataclass(frozen=True)
+class UpgradedEvent(_EventBase):
+    NAME: ClassVar[str] = "upgraded"
+    TOPIC_FIELDS: ClassVar[tuple[str, ...]] = ()
+    DATA_FIELDS: ClassVar[tuple[str, ...]] = ("wasm_hash",)
+    wasm_hash: bytes
+
+
+@dataclass(frozen=True)
+class ReservedEvent(_EventBase):
+    NAME: ClassVar[str] = "reserved"
+    TOPIC_FIELDS: ClassVar[tuple[str, ...]] = ("id", "customer")
+    DATA_FIELDS: ClassVar[tuple[str, ...]] = ("token", "amount", "listing_ref")
+    id: int
+    customer: str
+    token: str
+    amount: int
+    listing_ref: bytes
+
+
+@dataclass(frozen=True)
+class ReleasedEvent(_EventBase):
+    NAME: ClassVar[str] = "released"
+    TOPIC_FIELDS: ClassVar[tuple[str, ...]] = ("id", "customer")
+    DATA_FIELDS: ClassVar[tuple[str, ...]] = ("token", "amount", "remaining")
+    id: int
+    customer: str
+    token: str
+    amount: int
+    remaining: int
+
+
+@dataclass(frozen=True)
+class ReservationDrawnEvent(_EventBase):
+    NAME: ClassVar[str] = "reservation_drawn"
+    TOPIC_FIELDS: ClassVar[tuple[str, ...]] = ("id", "agreement_id")
+    DATA_FIELDS: ClassVar[tuple[str, ...]] = ("amount", "remaining")
+    id: int
+    agreement_id: int
+    amount: int
+    remaining: int
+
+
+VaultEvent = (
+    ProposedEvent
+    | OpenedEvent
+    | ActivatedEvent
+    | CancelledEvent
+    | TradedEvent
+    | SettledEvent
+    | ConfigChangedEvent
+    | TokenSetEvent
+    | UpgradedEvent
+    | ReservedEvent
+    | ReleasedEvent
+    | ReservationDrawnEvent
+)
+
+EVENT_TYPES: dict[str, type[_EventBase]] = {
+    cls.NAME: cls
+    for cls in (
+        ProposedEvent,
+        OpenedEvent,
+        ActivatedEvent,
+        CancelledEvent,
+        TradedEvent,
+        SettledEvent,
+        ConfigChangedEvent,
+        TokenSetEvent,
+        UpgradedEvent,
+        ReservedEvent,
+        ReleasedEvent,
+        ReservationDrawnEvent,
+    )
+}
+
+#: Events that change a reservation (topic[1] is the reservation id).
+RESERVATION_EVENT_NAMES = frozenset({"reserved", "released", "reservation_drawn"})
+
+#: Events that change an agreement's lifecycle (topic[1] is the agreement id).
+AGREEMENT_EVENT_NAMES = frozenset({"proposed", "opened", "activated", "cancelled", "traded", "settled"})
+
+
+def event_name(topics: list[sx.SCVal | str]) -> str | None:
+    """First topic as a symbol, or None when it is not a symbol (not one of ours)."""
+    if not topics:
+        return None
+    t0 = _sc(topics[0])
+    if t0.type != sx.SCValType.SCV_SYMBOL:
+        return None
+    return dec_symbol(t0)
+
+
+def decode_event(topics: list[sx.SCVal | str], data: sx.SCVal | str | None) -> VaultEvent | None:
+    """Vault event from raw topics/data (SCVal objects or base64 XDR). None when it is not a vault event.
+
+    Raises StellarError(code="abi_decode_error") when the name matches but the shape does not.
+    """
+    name = event_name(topics)
+    if name is None:
+        return None
+    cls = EVENT_TYPES.get(name)
+    if cls is None:
+        return None
+    sc_topics = [_sc(t) for t in topics]
+    sc_data = _sc(data) if data is not None else scval.to_void()
+    return cls._decode(sc_topics, sc_data)  # type: ignore[return-value]
+
+
+def event_topic_filters(names: list[str] | None = None) -> list[list[str]]:
+    """``getEvents`` topic filters (base64 symbol XDR + wildcards) for the given event names."""
+    out: list[list[str]] = []
+    for n in names or list(EVENT_TYPES):
+        cls = EVENT_TYPES[n]
+        out.append([enc_symbol(n).to_xdr(), *(["*"] * len(cls.TOPIC_FIELDS))])
+    return out
+
+
+__all__ = [
+    "AGREEMENT_EVENT_NAMES",
+    "RESERVATION_EVENT_NAMES",
+    "BPS_DENOM",
+    "ERROR_MESSAGES",
+    "EVENT_TYPES",
+    "FIELD_CODECS",
+    "LISTING_REF_LEN",
+    "MAX_COMMISSION_BPS",
+    "MAX_DURATION",
+    "MAX_PLATFORM_FEE_BPS",
+    "MAX_SETTLE_SLIPPAGE_BPS",
+    "MAX_TOKENS",
+    "MIN_DRAWDOWN_BPS",
+    "MIN_DURATION",
+    "ActivatedEvent",
+    "Agreement",
+    "CancelledEvent",
+    "Config",
+    "ConfigChangedEvent",
+    "Fn",
+    "OpenedEvent",
+    "ProposedEvent",
+    "ReleasedEvent",
+    "ReservationDrawnEvent",
+    "ReservedEvent",
+    "RouterFn",
+    "SettledEvent",
+    "Status",
+    "Terms",
+    "TokenInfo",
+    "TokenSetEvent",
+    "TradedEvent",
+    "UpgradedEvent",
+    "VaultContractError",
+    "VaultError",
+    "VaultEvent",
+    "args_cancel",
+    "args_id",
+    "args_open",
+    "args_propose",
+    "args_release",
+    "args_reserve",
+    "args_open_reserved",
+    "args_fund_reserved",
+    "args_router_amounts_out",
+    "args_set_fees",
+    "args_set_paused",
+    "args_set_token",
+    "args_settle",
+    "args_token_balance",
+    "args_trade",
+    "contract_error_from_scval",
+    "decode_balances",
+    "decode_event",
+    "decode_i128",
+    "decode_i128_vec",
+    "decode_u64",
+    "encode_balances",
+    "event_name",
+    "event_topic_filters",
+    "listing_ref_from_hex",
+    "parse_contract_error",
+]

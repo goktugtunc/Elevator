@@ -207,17 +207,26 @@ compensating there pushed sheets a keyboard-height too high.
 
 ```
 elevator/
-├── app/          Expo + React Native client (this repository)
+├── app/          Expo + React Native client
 │   ├── app/          Screens (expo-router)
 │   ├── src/          Components, API client, wallet adapter, stores
 │   └── scripts/      gen-api-types.py — OpenAPI → TypeScript
-├── contracts/    Soroban contracts (Rust) — see note below
+├── server/       FastAPI backend, worker and deployment
+│   ├── app/          Routers, services, models
+│   ├── alembic/      Migrations
+│   ├── scripts/      Deployment, seeding, testnet end-to-end
+│   ├── tests/        Pytest suite
+│   └── deploy/       nginx config and the recorded contract deployment
+├── contracts/    Soroban contracts (Rust)
+│   ├── vault/        The escrow — reserve, fund, trade, settle
+│   └── mock_router/  Router stub the vault is tested against
 ├── docs/         Design system and development notes
 └── SPRINT-1.md   Sprint plan
 ```
 
-The server and the Rust contract sources live in a separate deployment repository;
-the built contract is on testnet at the id above and the API is public.
+Client, server and contract are all in this repository. The vault is deployed on
+testnet at the id above and the API is public, so the running system can be checked
+without building anything.
 
 ---
 
@@ -239,6 +248,21 @@ WalletConnect; on web through Stellar Wallets Kit.
 
 Checks: `npm run check` (TypeScript + ESLint), `npm run typecheck`, `npm run lint`.
 
+### Server
+
+```bash
+cd server
+cp .env.example .env          # or: python scripts/gen_env.py  — generates fresh secrets
+docker compose up -d --build  # api, worker and postgres
+docker compose exec api alembic upgrade head
+```
+
+The API answers on `:8012` and serves its own OpenAPI at `/docs`. `PLATFORM_SECRET`
+and `SEP10_SERVER_SECRET` are Stellar secret keys and stay in `.env`, which is not
+committed — `scripts/gen_env.py` mints a complete one for a fresh deployment.
+
+Tests: `pytest` inside `server/`.
+
 ### Contract
 
 ```bash
@@ -247,7 +271,8 @@ stellar contract build --package elevator_vault
 cargo test --package elevator_vault        # 47 tests
 ```
 
-Deploy and allow-list tokens: `scripts/deploy_contract.sh testnet`.
+Deploy and allow-list tokens: `server/scripts/deploy_contract.sh testnet`. The
+deployment it produced is recorded in `server/deploy/contract.testnet.json`.
 
 ### Evaluating the flow
 
