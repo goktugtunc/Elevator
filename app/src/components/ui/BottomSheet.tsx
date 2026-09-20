@@ -36,7 +36,7 @@ export function BottomSheet({
       <View style={styles.root}>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="Kapat"
+          accessibilityLabel="Close"
           style={styles.backdrop}
           onPress={onClose}
         />
@@ -63,7 +63,7 @@ export function BottomSheet({
               </View>
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel="Kapat"
+                accessibilityLabel="Close"
                 onPress={onClose}
                 hitSlop={8}
                 style={styles.close}
