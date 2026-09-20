@@ -327,6 +327,11 @@ export interface ContractLimits {
   max_settle_slippage_bps?: number;
 }
 
+/** Teklife bağlı olmayan doğrudan sohbet açar (Keşfet kartı / trader profili). */
+export interface ConversationCreateIn {
+  user_id: string;
+}
+
 export interface ConversationOut {
   id: string;
   offer_id?: string | null;
@@ -560,6 +565,7 @@ export interface ListingBriefOut {
 }
 
 export interface ListingCountsOut {
+  draft?: number;
   active?: number;
   paused?: number;
   closed?: number;
@@ -598,6 +604,9 @@ export interface ListingDetailOut {
   base_asset?: AssetOut | null;
   duration_days?: number | null;
   max_loss_bps?: number | null;
+  reservation_id?: number | null;
+  reserved_amount?: string | null;
+  is_funded?: boolean;
   commission_bps?: number | null;
   min_capital?: string | null;
   expected_return_min_bps?: number | null;
@@ -642,6 +651,9 @@ export interface ListingOut {
   base_asset?: AssetOut | null;
   duration_days?: number | null;
   max_loss_bps?: number | null;
+  reservation_id?: number | null;
+  reserved_amount?: string | null;
+  is_funded?: boolean;
   commission_bps?: number | null;
   min_capital?: string | null;
   expected_return_min_bps?: number | null;
@@ -657,7 +669,7 @@ export interface ListingOut {
   is_liked?: boolean | null;
 }
 
-export type ListingStatus = "active" | "paused" | "closed";
+export type ListingStatus = "draft" | "active" | "paused" | "closed";
 
 /** PATCH body: only the fields present are applied. `kind` and `owner` never change. */
 export interface ListingUpdateIn {
@@ -892,7 +904,7 @@ export interface PendingTxBriefOut {
   expires_at: string;
 }
 
-export type PendingTxKind = "open" | "propose" | "fund" | "accept" | "cancel" | "trade" | "settle" | "payment" | "trustline" | "admin";
+export type PendingTxKind = "open" | "propose" | "fund" | "accept" | "cancel" | "trade" | "settle" | "payment" | "trustline" | "admin" | "reserve" | "release";
 
 export interface PendingTxOut {
   id: string;

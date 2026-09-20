@@ -13,12 +13,18 @@ import {
 } from '@/components/layout';
 import { Button, Card, Pill, RiskBadge, Segmented, Text } from '@/components/ui';
 import { listingsApi } from '@/lib/api';
-import type { ListingOut, ListingStatus, UserRole } from '@/lib/api/types';
+import type { ListingCountsOut, ListingOut, ListingStatus, UserRole } from '@/lib/api/types';
 import { userMessage } from '@/lib/errors';
 import { formatAmount, formatBps, formatDuration, formatRelative } from '@/lib/format';
 import { colors, spacing } from '@/theme';
 
-const TABS: { value: ListingStatus; label: string }[] = [
+/**
+ * Sekmeler. "Draft" yalnızca taslak varken görünür: sermaye ilanı, parası
+ * kasaya yatırılana kadar taslaktır; yatırma yarıda kalırsa ilan buradan
+ * bulunup tamamlanabilsin ya da kapatılabilsin diye sekme açılır.
+ */
+const TABS: { value: keyof ListingCountsOut; label: string }[] = [
+  { value: 'draft', label: 'Draft' },
   { value: 'active', label: 'Active' },
   { value: 'paused', label: 'Paused' },
   { value: 'closed', label: 'Closed' },
@@ -75,10 +81,12 @@ export function MyListings({ role }: { role: UserRole }) {
       />
       <View style={styles.body}>
         <Segmented
-          options={TABS.map((t) => ({
-            value: t.value,
-            label: counts.data?.[t.value] ? `${t.label} (${counts.data[t.value]})` : t.label,
-          }))}
+          options={TABS.filter((t) => t.value !== 'draft' || (counts.data?.draft ?? 0) > 0).map(
+            (t) => ({
+              value: t.value,
+              label: counts.data?.[t.value] ? `${t.label} (${counts.data[t.value]})` : t.label,
+            }),
+          )}
           value={status}
           onChange={setStatus}
         />

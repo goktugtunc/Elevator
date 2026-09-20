@@ -173,6 +173,14 @@ export const listingsApi = {
   pause: (id: string) => http.post<ListingOut>(`${V1}/listings/${id}/pause`),
   resume: (id: string) => http.post<ListingOut>(`${V1}/listings/${id}/resume`),
   close: (id: string) => http.post<ListingOut>(`${V1}/listings/${id}/close`),
+  /**
+   * Sermaye ilanının parasını kasaya kilitleyen imzasız işlem. Sermaye ilanı bu
+   * imzalanana kadar taslaktır: yayına ancak para yatırılınca çıkar, böylece
+   * ilandaki tutar her zaman sahibinin gerçekten yatırdığı para olur.
+   */
+  reserveTx: (id: string) => http.post<UnsignedTxOut>(`${V1}/listings/${id}/tx/reserve`),
+  /** Kilitli kalan sermayeyi geri veren imzasız işlem (ilan kapatılmadan önce). */
+  releaseTx: (id: string) => http.post<UnsignedTxOut>(`${V1}/listings/${id}/tx/release`),
 };
 
 // --- Teklifler ---

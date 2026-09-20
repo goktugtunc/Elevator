@@ -4,11 +4,12 @@ import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { AsyncBoundary, EmptyState, Screen, TopBar } from '@/components/layout';
-import { Button, Card, ListRow, Pill, RiskBadge, Segmented, Text } from '@/components/ui';
+import { Button, Card, ErrorNotice, ListRow, Pill, RiskBadge, Segmented, Text } from '@/components/ui';
 import { listingsApi, offersApi } from '@/lib/api';
 import type { ListingDetailOut, OfferOut, OfferStatus } from '@/lib/api/types';
 import { userMessage } from '@/lib/errors';
 import { formatAmount, formatBps, formatDuration, formatRelative } from '@/lib/format';
+import { phaseLabel, useOnchainAction } from '@/lib/onchain';
 import { isPast, useNow } from '@/lib/useNow';
 import { useSession } from '@/store/session';
 import { colors, spacing } from '@/theme';
@@ -61,6 +62,18 @@ export default function ListingDetail() {
     onSuccess: refresh,
   });
 
+  /** Yarıda kalmış yatırmayı tamamlar: taslak ilan ancak böyle yayına çıkar. */
+  const deposit = useOnchainAction({
+    build: () => listingsApi.reserveTx(id),
+    invalidate: [['listing', id], ['listings'], ['dashboard'], ['wallet']],
+  });
+
+  /** Kilitli kalan sermayeyi cüzdana geri çeker (ilan kapatılmadan önce şart). */
+  const release = useOnchainAction({
+    build: () => listingsApi.releaseTx(id),
+    invalidate: [['listing', id], ['listings'], ['dashboard'], ['wallet']],
+  });
+
   return (
     <Screen padded={false}>
       <TopBar title="Listing" />
@@ -69,6 +82,10 @@ export default function ListingDetail() {
           {(l) => (
             <>
               <Header listing={l} />
+
+              {l.is_owner && l.kind === 'capital' ? (
+                <EscrowCard listing={l} deposit={deposit} release={release} />
+              ) : null}
 
               <Segmented
                 options={[
@@ -191,12 +208,87 @@ function Header({ listing }: { listing: ListingDetailOut }) {
   );
 }
 
+/**
+ * Sermaye ilanının parası nerede: kasada mı, ne kadarı hâlâ serbest.
+ *
+ * Sermaye ilan yayınlanırken kasaya yatırılır; kiralanan trader parayı oradan
+ * kullanır, cüzdana hiç dokunamaz. Kullanılmayan kısım her an geri çekilebilir.
+ */
+function EscrowCard({
+  listing,
+  deposit,
+  release,
+}: {
+  listing: ListingDetailOut;
+  deposit: ReturnType<typeof useOnchainAction>;
+  release: ReturnType<typeof useOnchainAction>;
+}) {
+  const code = listing.base_asset?.code ?? '';
+  const locked = listing.reserved_amount ?? '0';
+  const isDraft = listing.status === 'draft';
+  const hasLocked = Number(locked) > 0;
+  const busy = deposit.busy || release.busy;
+
+  return (
+    <Card style={styles.escrow}>
+      <Text variant="captionStrong" color="text2">
+        {isDraft ? 'Not published yet' : 'In escrow'}
+      </Text>
+      {isDraft ? (
+        <Text variant="body" color="text2">
+          This listing goes live once you move {formatAmount(listing.amount ?? '0', code)} into the
+          escrow. Nobody sees it until then.
+        </Text>
+      ) : (
+        <>
+          <Text variant="numeric">{formatAmount(locked, code)}</Text>
+          <Text variant="caption" color="text3">
+            Locked for this listing. A trader you hire trades it inside the escrow and can never
+            withdraw it; whatever is not committed to an agreement is yours to take back.
+          </Text>
+        </>
+      )}
+
+      {deposit.error ? <ErrorNotice title="Deposit failed" error={deposit.error} /> : null}
+      {release.error ? <ErrorNotice title="Withdrawal failed" error={release.error} /> : null}
+      {busy ? (
+        <Text variant="caption" color="text2">
+          {phaseLabel(deposit.busy ? deposit.phase : release.phase)}
+        </Text>
+      ) : null}
+
+      <View style={styles.escrowActions}>
+        {isDraft ? (
+          <Button title="Deposit & publish" loading={deposit.busy} onPress={deposit.run} />
+        ) : hasLocked ? (
+          <Button
+            title="Withdraw"
+            variant="secondary"
+            loading={release.busy}
+            onPress={release.run}
+          />
+        ) : null}
+      </View>
+    </Card>
+  );
+}
+
 function Details({ listing }: { listing: ListingDetailOut }) {
   const assetCode = listing.base_asset?.code ?? '';
   const rows: { label: string; value: string }[] = [
     { label: 'Owner', value: `${listing.owner.display_name} (@${listing.owner.username})` },
     { label: 'Status', value: listing.status },
     { label: 'Base asset', value: assetCode || '—' },
+    ...(listing.kind === 'capital'
+      ? [
+          {
+            label: 'In escrow',
+            value: listing.reserved_amount
+              ? formatAmount(listing.reserved_amount, assetCode)
+              : 'Nothing locked',
+          },
+        ]
+      : []),
     { label: 'Duration', value: formatDuration(listing.duration_days) },
     { label: 'Views', value: String(listing.view_count ?? 0) },
     { label: 'Likes', value: String(listing.like_count ?? 0) },
@@ -307,6 +399,8 @@ function Figure({ label, value }: { label: string; value: string }) {
 }
 
 const styles = StyleSheet.create({
+  escrow: { gap: spacing.sm },
+  escrowActions: { flexDirection: 'row', gap: spacing.sm },
   body: { paddingHorizontal: spacing.lg, paddingBottom: spacing['2xl'], gap: spacing.md },
   header: { gap: spacing.sm },
   headerTop: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },

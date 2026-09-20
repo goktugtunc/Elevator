@@ -1,18 +1,20 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { Screen, TopBar } from '@/components/layout';
 import { Button, Card, Chip, ErrorNotice, Field, Progress, Text } from '@/components/ui';
-import { listingsApi, metaApi } from '@/lib/api';
+import { listingsApi, metaApi, walletApi } from '@/lib/api';
 import type {
+  AssetOut,
   ListingCreateIn,
   MarketCategory,
   RiskProfile,
   UserRole,
 } from '@/lib/api/types';
 import { formatAmount, parseNumberInput } from '@/lib/format';
+import { useOnchainAction, phaseLabel } from '@/lib/onchain';
 import { useSession } from '@/store/session';
 import { colors, radius, spacing } from '@/theme';
 
@@ -56,18 +58,58 @@ export default function CreateListing() {
   const [returnMin, setReturnMin] = useState('');
   const [returnMax, setReturnMax] = useState('');
 
-  // Sunucu temel varlığı kendisi seçebilir; yine de listeden ilkini öneririz.
+  const [assetId, setAssetId] = useState<string | null>(null);
+
   const assets = useQuery({ queryKey: ['assets', 'base'], queryFn: () => metaApi.assets({ base_only: true }) });
-  const baseAsset = assets.data?.[0];
+  // Sermaye gerçekten yatırılacağı için hangi varlıkta ne kadar olduğu önemli.
+  const walletQuery = useQuery({ queryKey: ['wallet'], queryFn: () => walletApi.get(), enabled: !isTrader });
+
+  const baseAssets = assets.data ?? [];
+  const baseAsset: AssetOut | undefined =
+    baseAssets.find((a) => a.id === assetId) ?? baseAssets[0];
+
+  /** Cüzdandaki bakiye (seçili varlık için); bilinmiyorsa null. */
+  const available = useMemo(() => {
+    if (!baseAsset) return null;
+    const row = walletQuery.data?.balances?.find(
+      (b) => b.asset?.id === baseAsset.id || b.code === baseAsset.code,
+    );
+    return row ? parseNumberInput(row.balance) : null;
+  }, [walletQuery.data, baseAsset]);
+
+  /**
+   * Yayınlama iki adım: ilan taslak olarak yaratılır, sonra sermayesi kasaya
+   * yatırılır. `reserve` imzalanmadan ilan yayına çıkmaz — yani kimse
+   * elinde olmayan bir sermayeyi ilan edemez.
+   */
+  const draftIdRef = useRef<string | null>(null); // imza kapanışı için (anlık)
+  const [draftId, setDraftId] = useState<string | null>(null); // çizim için
+
+  const deposit = useOnchainAction({
+    build: () => listingsApi.reserveTx(draftIdRef.current as string),
+    invalidate: [['listings'], ['dashboard'], ['wallet']],
+    onSuccess: (res) => {
+      if (!res.ok || !draftIdRef.current) return;
+      router.replace(`/listing/${draftIdRef.current}`);
+    },
+  });
 
   const create = useMutation({
     mutationFn: (payload: ListingCreateIn) => listingsApi.create(payload),
     onSuccess: (listing) => {
       void qc.invalidateQueries({ queryKey: ['listings'] });
       void qc.invalidateQueries({ queryKey: ['dashboard'] });
-      router.replace(`/listing/${listing.id}`);
+      if (isTrader) {
+        router.replace(`/listing/${listing.id}`);
+        return;
+      }
+      draftIdRef.current = listing.id;
+      setDraftId(listing.id);
+      deposit.run();
     },
   });
+
+  const publishing = create.isPending || deposit.busy;
 
   const validateStep = (index: number): Errors => {
     const next: Errors = {};
@@ -97,6 +139,10 @@ export default function CreateListing() {
       } else {
         const value = parseNumberInput(amount);
         if (value === null || value <= 0) next.amount = 'Enter the capital you want to allocate.';
+        // Sermaye yayında kasaya yatırılacağı için cüzdanda gerçekten olmalı.
+        else if (available !== null && value > available)
+          next.amount = `You only have ${formatAmount(String(available), assetCode)}.`;
+        if (!baseAsset) next.asset = 'Pick the asset you want to put up.';
         const duration = parseNumberInput(durationDays);
         if (duration === null || duration <= 0) next.durationDays = 'Enter a duration in days.';
         const loss = parseNumberInput(maxLoss);
@@ -285,6 +331,27 @@ export default function CreateListing() {
               </>
             ) : (
               <>
+                <View style={styles.group}>
+                  <Text variant="captionStrong" color="text2">
+                    Asset
+                  </Text>
+                  <View style={styles.chips}>
+                    {baseAssets.map((a) => (
+                      <Chip
+                        key={a.id}
+                        label={a.code}
+                        active={baseAsset?.id === a.id}
+                        onPress={() => setAssetId(a.id)}
+                      />
+                    ))}
+                  </View>
+                  <Text variant="caption" color={errors.asset ? 'loss' : 'text3'}>
+                    {errors.asset ??
+                      (available !== null
+                        ? `You hold ${formatAmount(String(available), assetCode)}.`
+                        : 'The asset your capital is put up in.')}
+                  </Text>
+                </View>
                 <Field
                   label="Capital"
                   value={amount}
@@ -293,7 +360,7 @@ export default function CreateListing() {
                   keyboardType="decimal-pad"
                   suffix={assetCode}
                   error={errors.amount}
-                  hint="Your capital stays in your wallet until you fund an agreement."
+                  hint="Published: this moves into the escrow and the trader you hire works with it."
                 />
                 <Field
                   label="Duration"
@@ -353,8 +420,26 @@ export default function CreateListing() {
                 </>
               )}
             </View>
+            {!isTrader ? (
+              <Text variant="caption" color="text2">
+                Publishing moves {formatAmount(payload.amount as string, assetCode)} into the escrow
+                and asks your wallet to sign it. It stays yours: the trader can only trade it, and
+                you can take back whatever is not committed at any time.
+              </Text>
+            ) : null}
             {create.isError ? (
               <ErrorNotice title="Could not publish" error={create.error} />
+            ) : null}
+            {deposit.error ? (
+              <ErrorNotice
+                title="The listing was saved, but the deposit did not go through"
+                error={deposit.error}
+              />
+            ) : null}
+            {deposit.busy ? (
+              <Text variant="caption" color="text2">
+                {phaseLabel(deposit.phase)}
+              </Text>
             ) : null}
           </Card>
         ) : null}
@@ -368,9 +453,18 @@ export default function CreateListing() {
             <Button title="Continue" onPress={goNext} />
           ) : (
             <Button
-              title="Publish listing"
-              loading={create.isPending}
-              onPress={() => create.mutate(payload)}
+              title={
+                deposit.error && draftId
+                  ? 'Retry the deposit'
+                  : isTrader
+                    ? 'Publish listing'
+                    : 'Deposit & publish'
+              }
+              loading={publishing}
+              onPress={() =>
+                // İlan zaten yaratıldıysa ikinci kez yaratma, sadece yatırmayı yinele.
+                draftId ? deposit.run() : create.mutate(payload)
+              }
             />
           )}
         </View>
